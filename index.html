@@ -186,9 +186,24 @@ function customerById(id){ return state.customers.find(c=>c.id===id); }
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 function rentalDriverById(id){ return state.rentalDrivers.find(d=>d.id===id); }
 function assignedDriverInfo(inv){
+  if(inv.selfPickup) return { selfPickup:true };
   if(inv.rentalDriverId){ const d=rentalDriverById(inv.rentalDriverId); if(d) return { name:d.name, phone:d.phone, vehicle:d.vehicle, agency:d.agency, isRental:true }; }
   if(inv.driverId){ const d=driverById(inv.driverId); if(d) return { name:d.name, phone:d.phone, vehicle:d.vehicle, isRental:false }; }
   return null;
+}
+function statusLabelFor(inv){
+  if(inv.selfPickup){
+    if(inv.status==="in_transit") return "Ready for pickup";
+    if(inv.status==="delivered") return "Picked up";
+  }
+  return STATUS_LABEL[inv.status] || inv.status;
+}
+function nextStatusLabel(inv, nextKey){
+  if(inv.selfPickup){
+    if(nextKey==="in_transit") return "Mark ready for pickup";
+    if(nextKey==="delivered") return "Mark picked up";
+  }
+  return NEXT_LABEL[inv.status];
 }
 function siteById(id){ return state.sites.find(s=>s.id===id); }
 function sitesOfCustomer(cid){ return state.sites.filter(s=>s.customerId===cid); }
@@ -242,9 +257,12 @@ function buildStatusMessage(inv){
   const pend = pendingOf(inv);
   const lines = [];
   lines.push("Hi "+(cust?cust.name:"there")+", update on your order "+inv.invoiceNumber+(inv.doNumber?" (DO "+inv.doNumber+")":"")+" from Reality Building Materials:");
-  lines.push("Status: "+(STATUS_LABEL[inv.status]||inv.status));
+  lines.push("Status: "+statusLabelFor(inv));
   if(inv.totalItems) lines.push("Items: "+inv.totalItems+" total"+(pend.length ? ", "+pend.length+" pending (will follow separately)" : ", all ready"));
-  if(driver && inv.status==="in_transit") lines.push("Driver: "+driver.name+(driver.phone?" ("+driver.phone+")":""));
+  if(driver && inv.status==="in_transit"){
+    if(driver.selfPickup) lines.push("Ready for you to collect from our warehouse whenever convenient.");
+    else lines.push("Driver: "+driver.name+(driver.phone?" ("+driver.phone+")":""));
+  }
   if(inv.notes) lines.push("Note: "+inv.notes);
   lines.push("\u2014 Reality BM");
   return lines.join("\n");
@@ -424,7 +442,7 @@ function viewLive(){
         return `<div class="kcard" data-open-invoice="${inv.id}">
           <b>${esc(inv.invoiceNumber)}</b>
           <span class="faint">${esc(cust?cust.name:"\u2014")}</span><br>
-          ${pend?`<span class="pill pill-rust" style="margin-top:4px;">${pend} pending</span>`:""}
+          ${inv.selfPickup?`<span class="pill pill-violet" style="margin-top:4px;">Self pickup</span> `:""}${pend?`<span class="pill pill-rust" style="margin-top:4px;">${pend} pending</span>`:""}
         </div>`;
       }).join("") : `<p class="faint" style="font-size:12.5px;">Nothing here.</p>`) +
       (st==="delivered" && full.length>25 ? `<p class="faint" style="font-size:12px;">+${full.length-25} more \u2014 see Overview</p>` : "") +
@@ -460,8 +478,8 @@ function invoicesTable(list){
       return `<tr class="row-click" data-open-invoice="${inv.id}">
         <td><b>${esc(inv.invoiceNumber)}</b></td>
         <td>${esc(inv.doNumber||"\u2014")}</td>
-        <td>${esc(cust?cust.name:"\u2014")}</td>
-        <td><span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]||inv.status}</span></td>
+        <td>${esc(cust?cust.name:"\u2014")}${inv.selfPickup?` <span class="pill pill-violet">Self pickup</span>`:""}</td>
+        <td><span class="pill ${STATUS_PILL[inv.status]}">${statusLabelFor(inv)}</span></td>
         <td>${inv.totalItems||0} total${pend?` <span class="pill pill-rust">${pend} pending</span>`:""}</td>
         <td class="faint">${fmtDate(inv.createdAt)}</td>
       </tr>`;
@@ -761,7 +779,7 @@ function viewMyDeliveries(){
     return `<div class="card" style="margin-bottom:14px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
         <div><h3>${esc(inv.invoiceNumber)}</h3><p class="faint">DO ${esc(inv.doNumber||"\u2014")}</p></div>
-        <span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span>
+        <span class="pill ${STATUS_PILL[inv.status]}">${statusLabelFor(inv)}</span>
       </div>
       <p style="margin-top:12px;"><b>${esc(cust?cust.name:"\u2014")}</b>${cust&&cust.company?" \u2014 "+esc(cust.company):""}</p>
       ${cust&&cust.address ? `<p class="faint" style="margin-top:2px;">${esc(cust.address)}</p>` : ""}
@@ -791,11 +809,11 @@ function viewMyOrders(){
     return `<div class="card" style="margin-bottom:14px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
         <div><h3>${esc(inv.invoiceNumber)}</h3><p class="faint">DO ${esc(inv.doNumber||"\u2014")} &middot; ${fmtDate(inv.createdAt)}</p></div>
-        <span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span>
+        <span class="pill ${STATUS_PILL[inv.status]}">${statusLabelFor(inv)}</span>
       </div>
       <p style="margin-top:12px;">${inv.totalItems||0} items total${pend.length?`, <span style="color:var(--rust);">${pend.length} pending</span>`:", all ready"}</p>
       ${pend.length ? `<div style="margin-top:10px;">${pend.map(p=>`<div class="itemline"><span class="name">Item ${esc(p.itemNumber)}${p.note?" \u2014 "+esc(p.note):""}</span><span class="pill pill-rust">pending</span></div>`).join("")}</div>` : ""}
-      ${showDriver ? `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+esc(driver.phone):""}</p>` : ""}
+      ${showDriver ? (driver.selfPickup ? `<p class="faint" style="margin-top:12px;">Self pickup \u2014 ready to collect from our warehouse.</p>` : `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+esc(driver.phone):""}</p>`) : ""}
       ${(()=>{ const site = inv.siteId ? siteById(inv.siteId) : null; if(!site) return ""; return `<div style="margin-top:10px; padding:10px 12px; background:var(--surface-2); border-radius:8px;">
         <b>${esc(site.siteName)}</b>${site.address?`<br><span class="faint">${esc(site.address)}</span>`:""}
         ${site.supervisorName?`<br>Site contact: ${esc(site.supervisorName)}${site.supervisorPhone?" \u00b7 "+esc(site.supervisorPhone):""}`:""}
@@ -861,18 +879,22 @@ function newInvoiceForm(){
     return `<h2>New invoice</h2><p class="muted">No customers on file yet \u2014 ask an admin to add one.</p>
       <div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
   }
-  const custOptions = state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
   const driverOptions = `<option value="">Assign later</option>` + state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
   const rentalDriverOptions = `<option value="">\u2014</option>` + state.rentalDrivers.map(d=>`<option value="${d.id}">${esc(d.name)}${d.agency?" \u2014 "+esc(d.agency):""}</option>`).join("");
-  const firstCustId = state.customers[0].id;
   return `<h2>New invoice</h2>
     <div class="field"><label>Invoice number (from the counter)</label><input id="f-invnum" placeholder="e.g. INV-4021"></div>
     <div class="field"><label>DO number</label><input id="f-donum" placeholder="e.g. DO-1187"></div>
-    <div class="field"><label>Customer</label><select id="f-customer">${custOptions}</select></div>
-    <div class="field"><label>Delivery site (optional)</label><select id="f-site">${siteOptionsHtml(firstCustId, null)}</select></div>
+    <div class="field" style="position:relative;">
+      <label>Customer</label>
+      <input id="f-invcust-search" autocomplete="off" placeholder="Search customer">
+      <input type="hidden" id="f-customer" value="">
+      <div id="f-invcust-results" class="searchlist" style="display:none; position:absolute; z-index:6; width:100%; background:var(--surface);"></div>
+    </div>
+    <div class="field"><label>Delivery site (optional)</label><select id="f-site"><option value="">No specific site</option></select></div>
     <div class="field"><label>Total items on invoice</label><input id="f-total" type="number" min="1" placeholder="e.g. 20"></div>
     <div class="field"><label>Company driver (optional, can assign later)</label><select id="f-driver-new">${driverOptions}</select></div>
     <div class="field"><label>Rental driver (optional, outside/non-employee)</label><select id="f-rental-driver-new">${rentalDriverOptions}</select></div>
+    <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-selfpickup-new" style="width:auto;"> Self pickup \u2014 customer will collect, no driver needed</label></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2"></textarea></div>
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-invoice">Create invoice</button></div>`;
 }
@@ -1057,7 +1079,7 @@ function invoiceDetail(id){
     </div>`).join("");
 
   let body = `<h2>${esc(inv.invoiceNumber)}</h2>
-    <p class="faint" style="margin-bottom:16px;">DO ${esc(inv.doNumber||"\u2014")} &middot; ${esc(cust?cust.name:"\u2014")} &middot; <span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span></p>`;
+    <p class="faint" style="margin-bottom:16px;">DO ${esc(inv.doNumber||"\u2014")} &middot; ${esc(cust?cust.name:"\u2014")} &middot; <span class="pill ${STATUS_PILL[inv.status]}">${statusLabelFor(inv)}</span></p>`;
 
   if(isFullEditor){
     const custOptions = state.customers.map(c=>`<option value="${c.id}" ${c.id===inv.customerId?"selected":""}>${esc(c.name)}</option>`).join("");
@@ -1086,10 +1108,11 @@ function invoiceDetail(id){
       <button class="btn btn-sm btn-ghost" data-act="add-pending-row" style="margin-bottom:14px;">+ Add pending item</button>
       <div class="field"><label>Company driver</label><select id="f-driver">${driverOptions}</select></div>
       <div class="field"><label>Rental driver (outside, not an employee)</label><select id="f-rental-driver">${rentalDriverOptions}</select></div>
+      <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-selfpickup" style="width:auto;" ${inv.selfPickup?"checked":""}> Self pickup \u2014 customer will collect, no driver needed</label></div>
       <div class="modal-actions" style="justify-content:space-between;">
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          ${nextKey ? `<button class="btn btn-sm" data-act="set-status" data-status="${nextKey}" data-inv="${inv.id}">${NEXT_LABEL[inv.status]}</button>` : ""}
-          ${isFullEditor ? `<select id="f-status-override" style="width:auto; display:inline-block;">${STATUS_ORDER.map(s=>`<option value="${s}" ${s===inv.status?"selected":""}>${STATUS_LABEL[s]}</option>`).join("")}</select>
+          ${nextKey ? `<button class="btn btn-sm" data-act="set-status" data-status="${nextKey}" data-inv="${inv.id}">${nextStatusLabel(inv, nextKey)}</button>` : ""}
+          ${isFullEditor ? `<select id="f-status-override" style="width:auto; display:inline-block;">${STATUS_ORDER.map(s=>`<option value="${s}" ${s===inv.status?"selected":""}>${inv.selfPickup?statusLabelFor({...inv,status:s}):STATUS_LABEL[s]}</option>`).join("")}</select>
           <button class="btn btn-sm" data-act="override-status" data-inv="${inv.id}">Set status</button>` : ""}
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -1224,18 +1247,27 @@ function bindShell(){
     }
     const companyDrvSel = el("f-driver");
     const rentalDrvSel = el("f-rental-driver");
+    const selfPickupCb = el("f-selfpickup");
     if(companyDrvSel && rentalDrvSel){
-      companyDrvSel.addEventListener("change", ()=>{ if(companyDrvSel.value) rentalDrvSel.value=""; });
-      rentalDrvSel.addEventListener("change", ()=>{ if(rentalDrvSel.value) companyDrvSel.value=""; });
+      companyDrvSel.addEventListener("change", ()=>{ if(companyDrvSel.value){ rentalDrvSel.value=""; if(selfPickupCb) selfPickupCb.checked=false; } });
+      rentalDrvSel.addEventListener("change", ()=>{ if(rentalDrvSel.value){ companyDrvSel.value=""; if(selfPickupCb) selfPickupCb.checked=false; } });
+    }
+    if(selfPickupCb){
+      selfPickupCb.addEventListener("change", ()=>{ if(selfPickupCb.checked){ if(companyDrvSel) companyDrvSel.value=""; if(rentalDrvSel) rentalDrvSel.value=""; } });
     }
     const newDrvSel = el("f-driver-new");
     const newRentalDrvSel = el("f-rental-driver-new");
+    const newSelfPickupCb = el("f-selfpickup-new");
     if(newDrvSel && newRentalDrvSel){
-      newDrvSel.addEventListener("change", ()=>{ if(newDrvSel.value) newRentalDrvSel.value=""; });
-      newRentalDrvSel.addEventListener("change", ()=>{ if(newRentalDrvSel.value) newDrvSel.value=""; });
+      newDrvSel.addEventListener("change", ()=>{ if(newDrvSel.value){ newRentalDrvSel.value=""; if(newSelfPickupCb) newSelfPickupCb.checked=false; } });
+      newRentalDrvSel.addEventListener("change", ()=>{ if(newRentalDrvSel.value){ newDrvSel.value=""; if(newSelfPickupCb) newSelfPickupCb.checked=false; } });
+    }
+    if(newSelfPickupCb){
+      newSelfPickupCb.addEventListener("change", ()=>{ if(newSelfPickupCb.checked){ if(newDrvSel) newDrvSel.value=""; if(newRentalDrvSel) newRentalDrvSel.value=""; } });
     }
     bindCustomerPicker("f-customer-search", "f-customer", "f-customer-results", "Unassigned");
     bindCustomerPicker("f-customerlink-search", "f-customer-link", "f-customerlink-results", "\u2014");
+    bindCustomerPicker("f-invcust-search", "f-customer", "f-invcust-results", "Select a customer");
   }
 }
 
@@ -1263,6 +1295,7 @@ function bindCustomerPicker(searchId, hiddenId, resultsId, emptyLabel){
     hidden.value = btn.getAttribute("data-pick");
     search.value = btn.getAttribute("data-name")||"";
     results.style.display = "none";
+    hidden.dispatchEvent(new Event("change", {bubbles:true}));
   }, true);
   search.addEventListener("focus", ()=>showResults(search.value));
   search.addEventListener("input", ()=>showResults(search.value));
@@ -1378,16 +1411,17 @@ async function modalClickHandler(e){
     const don = el("f-donum").value.trim();
     const cid = el("f-customer").value;
     const total = parseInt(el("f-total").value,10)||0;
-    const driverId = el("f-driver-new").value || null;
-    const rentalDriverId = el("f-rental-driver-new") ? (el("f-rental-driver-new").value||null) : null;
+    const selfPickup = el("f-selfpickup-new") ? el("f-selfpickup-new").checked : false;
+    const driverId = selfPickup ? null : (el("f-driver-new").value || null);
+    const rentalDriverId = selfPickup ? null : (el("f-rental-driver-new") ? (el("f-rental-driver-new").value||null) : null);
     const siteId = el("f-site") ? (el("f-site").value||null) : null;
     if(!num || !cid){ showToast("Fill in invoice number and customer"); return; }
     const newInv = {
       invoiceNumber:num, doNumber:don, customerId:cid, totalItems:total, pendingItems:[],
-      status:"ordered", driverId, rentalDriverId, siteId, notes:el("f-notes").value.trim(),
+      status:"ordered", driverId, rentalDriverId, selfPickup, siteId, notes:el("f-notes").value.trim(),
       createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name, createdByRole:profile.role
     };
-    newInv.history = [histLine("Invoice created")];
+    newInv.history = [histLine("Invoice created"+(selfPickup?" (self pickup)":""))];
     await addDoc(collection(db,"invoices"), newInv);
     ui.modal=null; render(); showToast("Invoice created");
   } else if(act==="save-user"){
@@ -1448,9 +1482,13 @@ async function modalClickHandler(e){
     const invId = b.getAttribute("data-inv");
     const inv = state.invoices.find(i=>i.id===invId);
     const cleanPending = ui.draftPending.items.filter(p=>p.itemNumber.trim()!=="");
-    const newDriverId = el("f-driver") ? (el("f-driver").value||null) : inv.driverId;
-    const newRentalDriverId = el("f-rental-driver") ? (el("f-rental-driver").value||null) : (inv.rentalDriverId||null);
+    const newSelfPickup = el("f-selfpickup") ? el("f-selfpickup").checked : !!inv.selfPickup;
+    const newDriverId = newSelfPickup ? null : (el("f-driver") ? (el("f-driver").value||null) : inv.driverId);
+    const newRentalDriverId = newSelfPickup ? null : (el("f-rental-driver") ? (el("f-rental-driver").value||null) : (inv.rentalDriverId||null));
     let hist = inv.history||[];
+    if(newSelfPickup !== !!inv.selfPickup){
+      hist = withHist({history:hist}, newSelfPickup ? "Marked as self pickup" : "Self pickup removed");
+    }
     if(newDriverId !== (inv.driverId||null)){
       const dName = newDriverId ? (driverById(newDriverId)||{}).name : "none";
       hist = withHist({history:hist}, "Company driver set to "+dName);
@@ -1460,7 +1498,7 @@ async function modalClickHandler(e){
       hist = withHist({history:hist}, "Rental driver set to "+(rd?rd.name+(rd.agency?" ("+rd.agency+")":""):"none"));
     }
     hist = withHist({history:hist}, "Pending items updated ("+cleanPending.length+" pending)");
-    const patch = { pendingItems:cleanPending, driverId:newDriverId, rentalDriverId:newRentalDriverId, updatedAt:Date.now(), history:hist };
+    const patch = { pendingItems:cleanPending, driverId:newDriverId, rentalDriverId:newRentalDriverId, selfPickup:newSelfPickup, updatedAt:Date.now(), history:hist };
     if(profile.role==="admin" || profile.role==="counter"){
       patch.invoiceNumber = el("f-invnum-e").value.trim();
       patch.doNumber = el("f-donum-e").value.trim();
