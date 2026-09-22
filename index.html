@@ -104,7 +104,7 @@ tr:last-child td{border-bottom:none;}
 .muted{color:var(--ink-muted);}
 .faint{color:var(--ink-faint); font-size:12.5px;}
 .err{color:var(--rust); font-size:12.5px; margin-top:8px;}
-.toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:999px; font-size:13px; font-weight:500; z-index:80; opacity:0; pointer-events:none; transition:opacity .2s;}
+.toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:14px; font-size:13px; font-weight:500; z-index:80; opacity:0; pointer-events:none; transition:opacity .2s; max-width:min(420px,88vw); text-align:center; line-height:1.4;}
 .toast.show{opacity:1;}
 .kanban{display:grid; grid-template-columns:repeat(4,1fr); gap:14px;}
 .kcol{background:var(--surface-2); border-radius:12px; padding:12px; max-height:70vh; overflow-y:auto;}
@@ -181,7 +181,7 @@ function el(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function fmtDate(ts){ if(!ts) return ""; return new Date(ts).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
 function fmtDateTime(ts){ if(!ts) return ""; return new Date(ts).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }
-function showToast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); }
+function showToast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); const dur = msg.length>60 ? 5200 : 2200; clearTimeout(showToast._t); showToast._t = setTimeout(()=>t.classList.remove("show"),dur); }
 function customerById(id){ return state.customers.find(c=>c.id===id); }
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 function rentalDriverById(id){ return state.rentalDrivers.find(d=>d.id===id); }
@@ -352,7 +352,7 @@ function bindLogin(){
   el("li-submit").addEventListener("click", async ()=>{
     ui.loginError = "";
     const raw = el("li-email").value.trim();
-    const pass = el("li-pass").value;
+    const pass = el("li-pass").value.trim();
     if(!raw || !pass){ ui.loginError="Enter your email/username and password."; render(); return; }
     let email = raw;
     if(raw.indexOf("@")===-1){
@@ -363,7 +363,13 @@ function bindLogin(){
       }catch(e){ ui.loginError="Could not look up that username. Try again."; render(); return; }
     }
     try{ await signInWithEmailAndPassword(auth, email, pass); }
-    catch(e){ ui.loginError = "Could not sign in. Check your details."; render(); }
+    catch(e){
+      if(e.code==="auth/wrong-password" || e.code==="auth/invalid-credential") ui.loginError = "That password doesn't match. If it was just created or changed, double-check for a stray space when copying it.";
+      else if(e.code==="auth/user-not-found") ui.loginError = "No account found for that username/email.";
+      else if(e.code==="auth/too-many-requests") ui.loginError = "Too many attempts \u2014 wait a moment and try again.";
+      else ui.loginError = "Could not sign in. Check your details.";
+      render();
+    }
   });
 }
 
@@ -758,13 +764,14 @@ function viewUsers(){
     list.map(u=>{
       const pw = isAdmin ? secretFor(u.id) : null;
       return `<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.email||"\u2014")}</td><td><span class="pill pill-muted">${esc(u.role)}</span></td>
-      ${isAdmin?`<td>${pw?esc(pw):'<span class="faint">not stored</span>'}</td>`:""}
-      <td style="text-align:right;"><button class="btn btn-sm" data-act="edit-user" data-id="${u.id}">Edit</button></td></tr>`;
+      ${isAdmin?`<td>${pw?`${esc(pw)} <button class="btn btn-sm btn-ghost" data-act="copy-password" data-pw="${esc(pw)}" aria-label="Copy password">Copy</button>`:'<span class="faint">not stored</span>'}</td>`:""}
+      <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-user" data-id="${u.id}">Edit</button>
+      ${isAdmin && u.id!==profile.uid ? `<button class="btn btn-sm btn-danger" data-act="del-user" data-id="${u.id}">Delete</button>` : ""}</td></tr>`;
     }).join("") +
     `</tbody></table>`;
   return pageHead("Users & roles","Create a login for a warehouse teammate, driver or customer", `<div class="toolbar">${searchBox("users-search", ui.usersSearch, "Search name, email or role")}<button class="btn btn-primary" data-act="new-user">Add user</button></div>`) +
     `<div class="card">${body}</div>
-    <p class="faint" style="margin-top:12px;">Passwords are only ever visible to Admin, and only for accounts created here \u2014 not for a password someone has since changed via a reset link.</p>`;
+    <p class="faint" style="margin-top:12px;">Passwords are only ever visible to Admin, and only for accounts created here \u2014 not for a password someone has since changed via a reset link. Deleting a login removes their access immediately; the underlying sign-in record can only fully disappear from Firebase Console \u2014 see the note when you delete one.</p>`;
 }
 
 /* ---------------- driver: my deliveries ---------------- */
@@ -1025,9 +1032,10 @@ function customerDetailView(id){
     const pw = profile.role==="admin" ? secretFor(linkedUser.id) : null;
     loginHtml = `<p><b>Username:</b> ${esc(linkedUser.loginUsername||linkedUser.email||"\u2014")}</p>` +
       (profile.role==="admin"
-        ? (pw ? `<p style="margin-top:4px;"><b>Password:</b> ${esc(pw)}</p>` : `<p style="margin-top:4px;" class="faint">Password not stored (created before this feature, or already changed).</p>`)
+        ? (pw ? `<p style="margin-top:4px;"><b>Password:</b> ${esc(pw)} <button class="btn btn-sm btn-ghost" data-act="copy-password" data-pw="${esc(pw)}">Copy</button></p>` : `<p style="margin-top:4px;" class="faint">Password not stored (created before this feature, or already changed).</p>`)
         : `<p style="margin-top:4px;" class="faint">Password is visible to Admin only.</p>`) +
-      (linkedUser.email && linkedUser.email.indexOf("@customer.")===-1 ? `<button class="btn btn-sm" style="margin-top:8px;" data-act="reset-password" data-email="${esc(linkedUser.email)}">Send password reset email</button>` : "");
+      (linkedUser.email && linkedUser.email.indexOf("@customer.")===-1 ? `<button class="btn btn-sm" style="margin-top:8px;" data-act="reset-password" data-email="${esc(linkedUser.email)}">Send password reset email</button>` : "") +
+      (profile.role==="admin" ? ` <button class="btn btn-sm btn-danger" style="margin-top:8px;" data-act="del-user" data-id="${linkedUser.id}">Delete login</button>` : "");
   } else {
     const previewUser = c.name ? slugifyUsername(c.name) : "";
     const previewPass = c.company ? reverseStr(c.company) : "";
@@ -1342,6 +1350,8 @@ function mainClickHandler(e){
   else if(act==="del-site"){ if(confirm("Remove this site?")) deleteDoc(doc(db,"sites",b.getAttribute("data-id"))); }
   else if(act==="del-customer"){ if(confirm("Remove this customer?")) deleteDoc(doc(db,"customers",b.getAttribute("data-id"))); }
   else if(act==="del-driver"){ if(confirm("Remove this driver?")) deleteDoc(doc(db,"drivers",b.getAttribute("data-id"))); }
+  else if(act==="del-user"){ deleteUserAccount(b.getAttribute("data-id")); }
+  else if(act==="copy-password"){ copyPassword(b.getAttribute("data-pw")); }
   else if(act==="open-followup"){
     const invId = b.getAttribute("data-inv");
     const itemIds = Array.from(document.querySelectorAll(`[data-pending-check][data-inv="${invId}"]:checked`)).map(cb=>cb.getAttribute("data-item"));
@@ -1361,6 +1371,8 @@ async function modalClickHandler(e){
   else if(act==="new-site-for"){ ui.modal={type:"new-site", forCustomerId:b.getAttribute("data-id"), returnTo:b.getAttribute("data-id")}; render(); }
   else if(act==="edit-site"){ ui.modal={type:"edit-site", id:b.getAttribute("data-id"), returnTo:b.getAttribute("data-return")||null}; render(); }
   else if(act==="del-site"){ if(confirm("Remove this site?")) await deleteDoc(doc(db,"sites",b.getAttribute("data-id"))); }
+  else if(act==="del-user"){ deleteUserAccount(b.getAttribute("data-id")); }
+  else if(act==="copy-password"){ copyPassword(b.getAttribute("data-pw")); }
   else if(act==="save-customer-detail"){
     const id = b.getAttribute("data-id");
     const name = el("f-name").value.trim();
@@ -1693,6 +1705,33 @@ async function deleteSelectedSites(){
   }
 }
 
+async function copyPassword(pw){
+  if(!pw) return;
+  try{ await navigator.clipboard.writeText(pw); showToast("Password copied"); }
+  catch(err){ showToast("Could not copy \u2014 select and copy manually"); }
+}
+
+async function deleteUserAccount(uid){
+  const u = state.users.find(x=>x.id===uid);
+  if(!u) return;
+  const msg = "Delete this login? They will no longer be able to sign in.\n\n" +
+    "Note: this removes their access in the app immediately, but the underlying " +
+    "sign-in record stays in Firebase (client apps can't delete other users' accounts) " +
+    "\u2014 if you want that email/username fully freed up for reuse, also remove it in " +
+    "Firebase Console \u2192 Authentication.";
+  if(!confirm(msg)) return;
+  try{
+    await deleteDoc(doc(db,"users",uid));
+    if(u.loginUsername){ try{ await deleteDoc(doc(db,"usernames",u.loginUsername)); }catch(e){} }
+    try{ await deleteDoc(doc(db,"secrets",uid)); }catch(e){}
+    if(ui.modal && ui.modal.type==="customer-detail"){ render(); }
+    else { ui.modal=null; render(); }
+    showToast("Login deleted");
+  }catch(err){
+    showToast("Could not delete \u2014 "+(err.code||"try again"));
+  }
+}
+
 async function createCustomerLogin(customerId){
   const c = customerById(customerId);
   if(!c) return;
@@ -1725,7 +1764,11 @@ async function createCustomerLogin(customerId){
     showToast("Login created \u2014 username: "+username);
     render();
   }catch(err){
-    showToast("Could not create login \u2014 "+(err.code||"try again"));
+    if(err.code==="auth/email-already-in-use"){
+      showToast("That username's sign-in record already exists in Firebase from a previous login \u2014 delete it in Firebase Console \u2192 Authentication, then try again.");
+    } else {
+      showToast("Could not create login \u2014 "+(err.code||"try again"));
+    }
   }
 }
 
