@@ -130,7 +130,7 @@ import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot, query, where
+  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot, query, where, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -153,7 +153,7 @@ const NEXT_STATUS = { ordered:"getting_ready", getting_ready:"in_transit", in_tr
 const NEXT_LABEL = { ordered:"Start getting ready", getting_ready:"Mark in transit", in_transit:"Mark delivered" };
 
 let profile = null;
-let state = { customers: [], drivers: [], invoices: [], users: [], sites: [] };
+let state = { customers: [], drivers: [], invoices: [], users: [], sites: [], secrets: [] };
 let unsubs = [];
 let ui = { view: null, modal: null, draftPending: null, loginError: "",
   overviewSearch: "", overviewStatus: "",
@@ -161,7 +161,8 @@ let ui = { view: null, modal: null, draftPending: null, loginError: "",
   pendingOrdersStatus: "",
   pendingItemsCustomer: "",
   sitesCustomer: "",
-  customersSearch: "", driversSearch: "", usersSearch: "" };
+  customersSearch: "", driversSearch: "", usersSearch: "",
+  bulkEdit: false, importProgress: null };
 
 function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function el(id){ return document.getElementById(id); }
@@ -185,6 +186,7 @@ function waLink(phone, text){ const digits=String(phone||"").replace(/[^0-9]/g,"
 function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
 function slugifyUsername(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
 function reverseStr(s){ return String(s||"").trim().split("").reverse().join(""); }
+function secretFor(uid){ const s = state.secrets.find(x=>x.id===uid); return s ? s.initialPasswordHint : null; }
 function matchesSearch(inv, term){
   if(!term) return true;
   const t = term.toLowerCase();
@@ -271,6 +273,9 @@ function startListeners(){
   }
   if(role==="admin" || role==="counter"){
     unsubs.push(onSnapshot(collection(db,"users"), snap=>{ state.users = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  }
+  if(role==="admin"){
+    unsubs.push(onSnapshot(collection(db,"secrets"), snap=>{ state.secrets = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
   render();
 }
@@ -473,16 +478,70 @@ function viewPending(){
 
 /* ---------------- customers / drivers (admin) ---------------- */
 
+const BULK_EDIT_CAP = 200;
 function viewCustomers(){
   const isAdmin = profile.role==="admin";
+  const isFullEditor = isAdmin || profile.role==="counter";
   const list = state.customers.filter(c=>textMatch([c.name,c.company,c.phone,c.address], ui.customersSearch));
+
+  const toolbar = `<div style="display:flex; gap:8px; flex-wrap:wrap;">
+    ${searchBox("customers-search", ui.customersSearch, "Search name, company or phone")}
+    ${isFullEditor ? `<button class="btn" data-act="toggle-bulk-edit">${ui.bulkEdit?"Cancel bulk edit":"Bulk edit"}</button>` : ""}
+    ${isFullEditor ? `<button class="btn" data-act="open-import-customers">Import customers</button>` : ""}
+    ${!ui.bulkEdit ? `<button class="btn btn-primary" data-act="new-customer">Add customer</button>` : ""}
+  </div>`;
+
+  if(ui.bulkEdit){
+    if(!list.length) return pageHead("Customers \u2014 bulk edit","Nothing matches this search", toolbar) + `<div class="empty">No customers match.</div>`;
+    if(list.length > BULK_EDIT_CAP) return pageHead("Customers \u2014 bulk edit","Narrow your search first", toolbar) +
+      `<div class="empty">${list.length} customers match \u2014 bulk edit works on up to ${BULK_EDIT_CAP} at a time. Use search to narrow it down first.</div>`;
+    const rows = list.map(c=>`<tr>
+      <td><input data-bulk-field="name" data-id="${c.id}" value="${esc(c.name)}"></td>
+      <td><input data-bulk-field="company" data-id="${c.id}" value="${esc(c.company||"")}"></td>
+      <td><input data-bulk-field="phone" data-id="${c.id}" value="${esc(c.phone||"")}"></td>
+      <td><input data-bulk-field="address" data-id="${c.id}" value="${esc(c.address||"")}"></td>
+    </tr>`).join("");
+    return pageHead("Customers \u2014 bulk edit", `Editing ${list.length} customer${list.length===1?"":"s"} \u2014 change any field, then save`, toolbar) +
+      `<div class="card"><table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="modal-actions" style="justify-content:flex-start; margin-top:14px;"><button class="btn btn-primary" data-act="save-bulk-edit">Save changes</button></div>`;
+  }
+
   const body = !list.length ? `<div class="empty">No customers match.</div>` :
     `<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
     list.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
       <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="open-customer" data-id="${c.id}">Open</button>
       ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
-  return pageHead("Customers","People and companies you deliver to", `<div style="display:flex; gap:8px; flex-wrap:wrap;">${searchBox("customers-search", ui.customersSearch, "Search name, company or phone")}<button class="btn btn-primary" data-act="new-customer">Add customer</button></div>`) + `<div class="card">${body}</div>`;
+  return pageHead("Customers","People and companies you deliver to", toolbar) + `<div class="card">${body}</div>`;
 }
+async function saveBulkEditCustomers(){
+  const rows = {};
+  document.querySelectorAll("[data-bulk-field]").forEach(f=>{
+    const id = f.getAttribute("data-id");
+    const field = f.getAttribute("data-bulk-field");
+    if(!rows[id]) rows[id] = {};
+    rows[id][field] = f.value.trim();
+  });
+  const batch = writeBatch(db);
+  let changed = 0;
+  Object.keys(rows).forEach(id=>{
+    const orig = customerById(id);
+    if(!orig) return;
+    const next = rows[id];
+    const diff = {};
+    ["name","company","phone","address"].forEach(f=>{ if((orig[f]||"") !== (next[f]||"")) diff[f] = next[f]; });
+    if(Object.keys(diff).length){ batch.update(doc(db,"customers",id), diff); changed++; }
+  });
+  if(!changed){ showToast("No changes to save"); ui.bulkEdit=false; render(); return; }
+  try{
+    await batch.commit();
+    showToast("Saved "+changed+" customer"+(changed===1?"":"s"));
+    ui.bulkEdit = false;
+    render();
+  }catch(err){
+    showToast("Could not save \u2014 "+(err.code||"try again"));
+  }
+}
+
 function viewDrivers(){
   const isAdmin = profile.role==="admin";
   const list = state.drivers.filter(d=>textMatch([d.name,d.phone,d.vehicle], ui.driversSearch));
@@ -525,15 +584,20 @@ function viewSites(){
 /* ---------------- users & roles (admin) ---------------- */
 
 function viewUsers(){
+  const isAdmin = profile.role==="admin";
   const list = state.users.filter(u=>textMatch([u.name,u.email,u.role], ui.usersSearch));
   const body = !list.length ? `<div class="empty">No accounts match.</div>` :
-    `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody>` +
-    list.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.email||"\u2014")}</td><td><span class="pill pill-muted">${esc(u.role)}</span></td>
-      <td style="text-align:right;"><button class="btn btn-sm" data-act="edit-user" data-id="${u.id}">Edit</button></td></tr>`).join("") +
+    `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th>${isAdmin?"<th>Password</th>":""}<th></th></tr></thead><tbody>` +
+    list.map(u=>{
+      const pw = isAdmin ? secretFor(u.id) : null;
+      return `<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.email||"\u2014")}</td><td><span class="pill pill-muted">${esc(u.role)}</span></td>
+      ${isAdmin?`<td>${pw?esc(pw):'<span class="faint">not stored</span>'}</td>`:""}
+      <td style="text-align:right;"><button class="btn btn-sm" data-act="edit-user" data-id="${u.id}">Edit</button></td></tr>`;
+    }).join("") +
     `</tbody></table>`;
   return pageHead("Users & roles","Create a login for a warehouse teammate, driver or customer", `<div style="display:flex; gap:8px; flex-wrap:wrap;">${searchBox("users-search", ui.usersSearch, "Search name, email or role")}<button class="btn btn-primary" data-act="new-user">Add user</button></div>`) +
     `<div class="card">${body}</div>
-    <p class="faint" style="margin-top:12px;">Editing here changes name/role only. Email and password are managed in the Firebase console.</p>`;
+    <p class="faint" style="margin-top:12px;">Passwords are only ever visible to Admin, and only for accounts created here \u2014 not for a password someone has since changed via a reset link.</p>`;
 }
 
 /* ---------------- driver: my deliveries ---------------- */
@@ -607,6 +671,7 @@ function renderModal(){
   if(m.type==="new-site") inner = siteForm(null, m.forCustomerId||null, m.returnTo||null);
   if(m.type==="edit-site") inner = siteForm(siteById(m.id), null, m.returnTo||null);
   if(m.type==="customer-detail") inner = customerDetailView(m.id);
+  if(m.type==="import-customers") inner = importCustomersForm();
   if(m.type==="open-invoice") inner = invoiceDetail(m.id);
   if(m.type==="followup") inner = followupForm(m.invId, m.itemId);
   return `<div class="modal-bg" data-act="close-modal-bg"><div class="modal">${inner}</div></div>`;
@@ -713,6 +778,23 @@ function followupForm(invId, itemId){
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-followup" data-inv="${invId}" data-item="${itemId}">Create delivery</button></div>`;
 }
 
+function importCustomersForm(){
+  if(ui.importProgress){
+    const p = ui.importProgress;
+    return `<h2>Importing customers</h2>
+      <p class="faint" style="margin-bottom:10px;">${p.done} of ${p.total} added\u2026 please keep this tab open.</p>
+      <div style="background:var(--surface-2); border-radius:8px; height:10px; overflow:hidden;">
+        <div style="background:var(--steel); height:100%; width:${Math.round(100*p.done/p.total)}%;"></div>
+      </div>
+      ${p.done>=p.total ? `<div class="modal-actions"><button class="btn btn-primary" data-act="close-modal">Done</button></div>` : ""}`;
+  }
+  return `<h2>Import customers</h2>
+    <p class="faint" style="margin-bottom:12px;">Paste one company name per line, or choose a text/CSV file with one name per line. Each becomes a new customer (name and company both set to that name \u2014 edit individually or with bulk edit afterward to split them or add phone numbers). Names matching an existing customer are skipped.</p>
+    <div class="field"><label>Upload a file (optional)</label><input type="file" id="f-import-file" accept=".txt,.csv"></div>
+    <div class="field"><label>Or paste names here</label><textarea id="f-import-text" rows="10" placeholder="One company name per line"></textarea></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="run-import-customers">Import</button></div>`;
+}
+
 function customerDetailView(id){
   const c = customerById(id);
   if(!c) return `<p>Not found.</p><div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
@@ -727,8 +809,11 @@ function customerDetailView(id){
 
   let loginHtml;
   if(linkedUser){
+    const pw = profile.role==="admin" ? secretFor(linkedUser.id) : null;
     loginHtml = `<p><b>Username:</b> ${esc(linkedUser.loginUsername||linkedUser.email||"\u2014")}</p>` +
-      (c.loginPasswordHint ? `<p style="margin-top:4px;"><b>Password:</b> ${esc(c.loginPasswordHint)} <span class="faint">(company name reversed, set when the login was created)</span></p>` : "") +
+      (profile.role==="admin"
+        ? (pw ? `<p style="margin-top:4px;"><b>Password:</b> ${esc(pw)}</p>` : `<p style="margin-top:4px;" class="faint">Password not stored (created before this feature, or already changed).</p>`)
+        : `<p style="margin-top:4px;" class="faint">Password is visible to Admin only.</p>`) +
       (linkedUser.email && linkedUser.email.indexOf("@customer.")===-1 ? `<button class="btn btn-sm" style="margin-top:8px;" data-act="reset-password" data-email="${esc(linkedUser.email)}">Send password reset email</button>` : "");
   } else {
     const previewUser = c.name ? slugifyUsername(c.name) : "";
@@ -876,6 +961,16 @@ function bindShell(){
   if(modalBg){
     modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
     modalBg.addEventListener("click", modalClickHandler);
+    const importFile = el("f-import-file");
+    if(importFile){
+      importFile.addEventListener("change", ()=>{
+        const file = importFile.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = ()=>{ const ta = el("f-import-text"); if(ta) ta.value = String(reader.result||""); };
+        reader.readAsText(file);
+      });
+    }
     const roleSel = el("f-role");
     if(roleSel){
       const sync = ()=>{ el("f-customer-wrap").style.display = roleSel.value==="customer" ? "block":"none"; el("f-driver-wrap").style.display = roleSel.value==="driver" ? "block":"none"; };
@@ -900,6 +995,9 @@ function mainClickHandler(e){
   const b = e.target.closest("[data-act]");
   if(!b) return;
   const act = b.getAttribute("data-act");
+  if(act==="toggle-bulk-edit"){ ui.bulkEdit = !ui.bulkEdit; render(); return; }
+  if(act==="save-bulk-edit"){ saveBulkEditCustomers(); return; }
+  if(act==="open-import-customers"){ ui.modal={type:"import-customers"}; ui.importProgress=null; render(); return; }
   if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
   else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
@@ -937,6 +1035,12 @@ async function modalClickHandler(e){
   else if(act==="create-customer-login"){
     const id = b.getAttribute("data-id");
     await createCustomerLogin(id);
+  }
+  else if(act==="run-import-customers"){
+    const raw = el("f-import-text").value;
+    const names = raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    if(!names.length){ showToast("Paste or upload some names first"); return; }
+    runCustomerImport(names);
   }
   else if(act==="save-customer"){
     const name = el("f-name").value.trim();
@@ -990,6 +1094,7 @@ async function modalClickHandler(e){
       const newUid = cred.user.uid;
       await signOut(secondaryAuth);
       await setDoc(doc(db,"users",newUid), { name, email, role, customerId, driverId, createdAt:Date.now() });
+      await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
       ui.modal=null; render(); showToast("Login created for "+name);
     }catch(err){
       showToast("Could not create login \u2014 "+(err.code||"try again"));
@@ -1115,6 +1220,37 @@ async function driverMarkDelivered(invId){
   showToast("Marked delivered");
 }
 
+async function runCustomerImport(names){
+  const existing = new Set(state.customers.map(c=>(c.name||"").trim().toLowerCase()));
+  const seen = new Set();
+  const toAdd = [];
+  names.forEach(n=>{
+    const key = n.toLowerCase();
+    if(existing.has(key) || seen.has(key)) return;
+    seen.add(key);
+    toAdd.push(n);
+  });
+  if(!toAdd.length){ showToast("Nothing new to import \u2014 all names already exist"); return; }
+
+  ui.importProgress = { done:0, total:toAdd.length };
+  render();
+
+  const CHUNK = 400;
+  for(let i=0; i<toAdd.length; i+=CHUNK){
+    const chunk = toAdd.slice(i, i+CHUNK);
+    const batch = writeBatch(db);
+    chunk.forEach(n=>{
+      const ref = doc(collection(db,"customers"));
+      batch.set(ref, { name:n, company:n, phone:"", address:"", createdAt:Date.now() });
+    });
+    try{ await batch.commit(); }
+    catch(err){ showToast("Import stopped \u2014 "+(err.code||"error")+". "+ui.importProgress.done+" were added."); return; }
+    ui.importProgress = { done: Math.min(i+CHUNK, toAdd.length), total: toAdd.length };
+    render();
+  }
+  showToast("Imported "+toAdd.length+" customers");
+}
+
 async function createCustomerLogin(customerId){
   const c = customerById(customerId);
   if(!c) return;
@@ -1142,7 +1278,8 @@ async function createCustomerLogin(customerId){
     await signOut(secondaryAuth);
     await setDoc(doc(db,"users",newUid), { name:c.name, email, role:"customer", customerId, driverId:null, loginUsername:username, createdAt:Date.now() });
     await setDoc(doc(db,"usernames",username), { email, customerId, createdAt:Date.now() });
-    await updateDoc(doc(db,"customers",customerId), { loginUsername:username, loginPasswordHint:password });
+    await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
+    await updateDoc(doc(db,"customers",customerId), { loginUsername:username });
     showToast("Login created \u2014 username: "+username);
     render();
   }catch(err){
