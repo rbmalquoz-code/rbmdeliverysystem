@@ -161,8 +161,8 @@ let ui = { view: null, modal: null, draftPending: null, loginError: "",
   pendingOrdersStatus: "",
   pendingItemsCustomer: "",
   sitesCustomer: "",
-  customersSearch: "", driversSearch: "", usersSearch: "",
-  bulkEdit: false, importProgress: null };
+  customersSearch: "", driversSearch: "", usersSearch: "", sitesSearch: "",
+  bulkEdit: false, bulkEditSites: false, importProgress: null };
 
 function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function el(id){ return document.getElementById(id); }
@@ -555,21 +555,53 @@ function viewDrivers(){
 
 /* ---------------- sites (visible to every role) ---------------- */
 
+function siteCustomerFilterHtml(id, value){
+  return `<select id="${id}" style="max-width:220px;"><option value="">All customers</option><option value="__unassigned__" ${value==="__unassigned__"?"selected":""}>Unassigned</option>${state.customers.map(c=>`<option value="${c.id}" ${value===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>`;
+}
 function viewSites(){
   const canEdit = profile.role==="admin" || profile.role==="counter" || profile.role==="warehouse";
   const canDelete = profile.role==="admin";
-  const showCustomerCol = profile.role!=="customer";
+  const showStaffControls = profile.role!=="customer";
   let list = state.sites.slice().sort((a,b)=>(a.siteName||"").localeCompare(b.siteName||""));
-  if(showCustomerCol && ui.sitesCustomer) list = list.filter(s=>s.customerId===ui.sitesCustomer);
-  const filterHtml = showCustomerCol ? customerFilterHtml("sites-customer-filter", ui.sitesCustomer) : "";
-  const actionHtml = `${filterHtml}${canEdit ? `<button class="btn btn-primary" data-act="new-site" style="margin-left:8px;">Add site</button>` : ""}`;
-  if(!list.length) return pageHead("Site locations","Delivery sites with their location and on-site contact", actionHtml) +
-    `<div class="empty">No sites saved yet.</div>`;
-  const body = `<table><thead><tr>${showCustomerCol?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${(canEdit||canDelete)?"<th></th>":""}</tr></thead><tbody>` +
+  if(showStaffControls){
+    if(ui.sitesCustomer==="__unassigned__") list = list.filter(s=>!s.customerId);
+    else if(ui.sitesCustomer) list = list.filter(s=>s.customerId===ui.sitesCustomer);
+    list = list.filter(s=>textMatch([s.siteName,s.address], ui.sitesSearch));
+  }
+
+  const toolbar = showStaffControls ? `<div style="display:flex; gap:8px; flex-wrap:wrap;">
+    ${searchBox("sites-search", ui.sitesSearch, "Search site name or address")}
+    ${siteCustomerFilterHtml("sites-customer-filter", ui.sitesCustomer)}
+    ${canEdit ? `<button class="btn" data-act="toggle-bulk-edit-sites">${ui.bulkEditSites?"Cancel bulk edit":"Bulk edit"}</button>` : ""}
+    ${canEdit ? `<button class="btn" data-act="open-import-sites">Import sites</button>` : ""}
+    ${canEdit && !ui.bulkEditSites ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : ""}
+  </div>` : "";
+
+  if(ui.bulkEditSites){
+    if(!list.length) return pageHead("Sites \u2014 bulk edit","Nothing matches this filter", toolbar) + `<div class="empty">No sites match.</div>`;
+    if(list.length > BULK_EDIT_CAP) return pageHead("Sites \u2014 bulk edit","Narrow your search first", toolbar) +
+      `<div class="empty">${list.length} sites match \u2014 bulk edit works on up to ${BULK_EDIT_CAP} at a time. Use search or the customer filter to narrow it down first.</div>`;
+    const custOptionsFor = (selectedId)=> `<option value="" ${!selectedId?"selected":""}>Unassigned</option>` +
+      state.customers.map(c=>`<option value="${c.id}" ${selectedId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
+    const rows = list.map(s=>`<tr>
+      <td><select data-bulk-site-field="customerId" data-id="${s.id}">${custOptionsFor(s.customerId||"")}</select></td>
+      <td><input data-bulk-site-field="siteName" data-id="${s.id}" value="${esc(s.siteName)}"></td>
+      <td><input data-bulk-site-field="address" data-id="${s.id}" value="${esc(s.address||"")}"></td>
+      <td><input data-bulk-site-field="supervisorName" data-id="${s.id}" value="${esc(s.supervisorName||"")}"></td>
+      <td><input data-bulk-site-field="supervisorPhone" data-id="${s.id}" value="${esc(s.supervisorPhone||"")}"></td>
+    </tr>`).join("");
+    return pageHead("Sites \u2014 bulk edit", `Editing ${list.length} site${list.length===1?"":"s"} \u2014 assign a customer or change any field, then save`, toolbar) +
+      `<div class="card" style="overflow-x:auto;"><table><thead><tr><th>Customer</th><th>Site</th><th>Address</th><th>Supervisor</th><th>Phone</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="modal-actions" style="justify-content:flex-start; margin-top:14px;"><button class="btn btn-primary" data-act="save-bulk-edit-sites">Save changes</button></div>`;
+  }
+
+  if(!list.length) return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", toolbar) +
+    `<div class="empty">No sites match.</div>`;
+  const body = `<table><thead><tr>${showStaffControls?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${(canEdit||canDelete)?"<th></th>":""}</tr></thead><tbody>` +
     list.map(s=>{
       const cust = customerById(s.customerId);
       return `<tr>
-        ${showCustomerCol?`<td>${esc(cust?cust.name:"\u2014")}</td>`:""}
+        ${showStaffControls?`<td>${cust?esc(cust.name):'<span class="pill pill-amber">Unassigned</span>'}</td>`:""}
         <td><b>${esc(s.siteName)}</b></td>
         <td class="faint">${esc(s.address||"\u2014")}</td>
         <td>${esc(s.supervisorName||"\u2014")}${s.supervisorPhone?`<br><span class="faint">${esc(s.supervisorPhone)}</span>`:""}</td>
@@ -577,8 +609,39 @@ function viewSites(){
         ${(canEdit||canDelete)?`<td style="text-align:right; white-space:nowrap;">${canEdit?`<button class="btn btn-sm" data-act="edit-site" data-id="${s.id}">Edit</button>`:""} ${canDelete?`<button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button>`:""}</td>`:""}
       </tr>`;
     }).join("") + `</tbody></table>`;
-  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", actionHtml) +
+  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", toolbar) +
     `<div class="card">${body}</div>`;
+}
+
+async function saveBulkEditSites(){
+  const rows = {};
+  document.querySelectorAll("[data-bulk-site-field]").forEach(f=>{
+    const id = f.getAttribute("data-id");
+    const field = f.getAttribute("data-bulk-site-field");
+    if(!rows[id]) rows[id] = {};
+    rows[id][field] = f.value.trim();
+  });
+  const batch = writeBatch(db);
+  let changed = 0;
+  Object.keys(rows).forEach(id=>{
+    const orig = siteById(id);
+    if(!orig) return;
+    const next = rows[id];
+    const diff = {};
+    ["siteName","address","supervisorName","supervisorPhone"].forEach(f=>{ if((orig[f]||"") !== (next[f]||"")) diff[f] = next[f]; });
+    const nextCustomerId = next.customerId || null;
+    if((orig.customerId||null) !== nextCustomerId) diff.customerId = nextCustomerId;
+    if(Object.keys(diff).length){ batch.update(doc(db,"sites",id), diff); changed++; }
+  });
+  if(!changed){ showToast("No changes to save"); ui.bulkEditSites=false; render(); return; }
+  try{
+    await batch.commit();
+    showToast("Saved "+changed+" site"+(changed===1?"":"s"));
+    ui.bulkEditSites = false;
+    render();
+  }catch(err){
+    showToast("Could not save \u2014 "+(err.code||"try again"));
+  }
 }
 
 /* ---------------- users & roles (admin) ---------------- */
@@ -672,6 +735,7 @@ function renderModal(){
   if(m.type==="edit-site") inner = siteForm(siteById(m.id), null, m.returnTo||null);
   if(m.type==="customer-detail") inner = customerDetailView(m.id);
   if(m.type==="import-customers") inner = importCustomersForm();
+  if(m.type==="import-sites") inner = importSitesForm();
   if(m.type==="open-invoice") inner = invoiceDetail(m.id);
   if(m.type==="followup") inner = followupForm(m.invId, m.itemId);
   return `<div class="modal-bg" data-act="close-modal-bg"><div class="modal">${inner}</div></div>`;
@@ -743,7 +807,7 @@ function siteForm(s, lockCustomerId, returnTo){
   const lockedCust = lockedId ? customerById(lockedId) : null;
   const custField = lockedCust
     ? `<input type="hidden" id="f-customer" value="${lockedCust.id}"><div class="field"><label>Customer</label><input value="${esc(lockedCust.name)}" disabled></div>`
-    : `<div class="field"><label>Customer</label><select id="f-customer">${state.customers.map(c=>`<option value="${c.id}" ${s&&s.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("")}</select></div>`;
+    : `<div class="field"><label>Customer</label><select id="f-customer"><option value="">Unassigned \u2014 link later</option>${state.customers.map(c=>`<option value="${c.id}" ${s&&s.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("")}</select></div>`;
   return `<h2>${s?"Edit site":"Add site"}</h2>
     ${custField}
     <div class="field"><label>Site name</label><input id="f-sitename" value="${s?esc(s.siteName):""}" placeholder="e.g. Villa 12, Al Barsha site"></div>
@@ -793,6 +857,23 @@ function importCustomersForm(){
     <div class="field"><label>Upload a file (optional)</label><input type="file" id="f-import-file" accept=".txt,.csv"></div>
     <div class="field"><label>Or paste names here</label><textarea id="f-import-text" rows="10" placeholder="One company name per line"></textarea></div>
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="run-import-customers">Import</button></div>`;
+}
+
+function importSitesForm(){
+  if(ui.importProgress){
+    const p = ui.importProgress;
+    return `<h2>Importing sites</h2>
+      <p class="faint" style="margin-bottom:10px;">${p.done} of ${p.total} added\u2026 please keep this tab open.</p>
+      <div style="background:var(--surface-2); border-radius:8px; height:10px; overflow:hidden;">
+        <div style="background:var(--steel); height:100%; width:${Math.round(100*p.done/p.total)}%;"></div>
+      </div>
+      ${p.done>=p.total ? `<div class="modal-actions"><button class="btn btn-primary" data-act="close-modal">Done</button></div>` : ""}`;
+  }
+  return `<h2>Import sites</h2>
+    <p class="faint" style="margin-bottom:12px;">Paste one site name per line, or choose a text/CSV file with one name per line. Each is added as an <b>unassigned</b> site \u2014 use Bulk edit afterward (or Customers &rarr; Open &rarr; Sites) to link each one to the right customer. Names matching an existing site are skipped.</p>
+    <div class="field"><label>Upload a file (optional)</label><input type="file" id="f-import-file" accept=".txt,.csv"></div>
+    <div class="field"><label>Or paste names here</label><textarea id="f-import-text" rows="10" placeholder="One site name per line"></textarea></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="run-import-sites">Import</button></div>`;
 }
 
 function customerDetailView(id){
@@ -952,6 +1033,7 @@ function bindShell(){
   bindSearchInput("customers-search", v=>{ ui.customersSearch = v; });
   bindSearchInput("drivers-search", v=>{ ui.driversSearch = v; });
   bindSearchInput("users-search", v=>{ ui.usersSearch = v; });
+  bindSearchInput("sites-search", v=>{ ui.sitesSearch = v; });
   bindFilterSelect("overview-status", v=>{ ui.overviewStatus = v; });
   bindFilterSelect("invoices-status", v=>{ ui.invoicesStatus = v; });
   bindFilterSelect("pendingorders-status", v=>{ ui.pendingOrdersStatus = v; });
@@ -998,6 +1080,9 @@ function mainClickHandler(e){
   if(act==="toggle-bulk-edit"){ ui.bulkEdit = !ui.bulkEdit; render(); return; }
   if(act==="save-bulk-edit"){ saveBulkEditCustomers(); return; }
   if(act==="open-import-customers"){ ui.modal={type:"import-customers"}; ui.importProgress=null; render(); return; }
+  if(act==="toggle-bulk-edit-sites"){ ui.bulkEditSites = !ui.bulkEditSites; render(); return; }
+  if(act==="save-bulk-edit-sites"){ saveBulkEditSites(); return; }
+  if(act==="open-import-sites"){ ui.modal={type:"import-sites"}; ui.importProgress=null; render(); return; }
   if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
   else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
@@ -1041,6 +1126,12 @@ async function modalClickHandler(e){
     const names = raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     if(!names.length){ showToast("Paste or upload some names first"); return; }
     runCustomerImport(names);
+  }
+  else if(act==="run-import-sites"){
+    const raw = el("f-import-text").value;
+    const names = raw.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    if(!names.length){ showToast("Paste or upload some names first"); return; }
+    runSiteImport(names);
   }
   else if(act==="save-customer"){
     const name = el("f-name").value.trim();
@@ -1100,9 +1191,9 @@ async function modalClickHandler(e){
       showToast("Could not create login \u2014 "+(err.code||"try again"));
     }
   } else if(act==="save-site"){
-    const cid = el("f-customer").value;
+    const cid = el("f-customer").value || null;
     const siteName = el("f-sitename").value.trim();
-    if(!cid || !siteName){ showToast("Pick a customer and enter a site name"); return; }
+    if(!siteName){ showToast("Enter a site name"); return; }
     const data = {
       customerId: cid, siteName,
       address: el("f-address").value.trim(),
@@ -1249,6 +1340,37 @@ async function runCustomerImport(names){
     render();
   }
   showToast("Imported "+toAdd.length+" customers");
+}
+
+async function runSiteImport(names){
+  const existing = new Set(state.sites.map(s=>(s.siteName||"").trim().toLowerCase()));
+  const seen = new Set();
+  const toAdd = [];
+  names.forEach(n=>{
+    const key = n.toLowerCase();
+    if(existing.has(key) || seen.has(key)) return;
+    seen.add(key);
+    toAdd.push(n);
+  });
+  if(!toAdd.length){ showToast("Nothing new to import \u2014 all names already exist"); return; }
+
+  ui.importProgress = { done:0, total:toAdd.length };
+  render();
+
+  const CHUNK = 400;
+  for(let i=0; i<toAdd.length; i+=CHUNK){
+    const chunk = toAdd.slice(i, i+CHUNK);
+    const batch = writeBatch(db);
+    chunk.forEach(n=>{
+      const ref = doc(collection(db,"sites"));
+      batch.set(ref, { customerId:null, siteName:n, address:"", mapLink:"", supervisorName:"", supervisorPhone:"", createdAt:Date.now(), createdByName:profile.name });
+    });
+    try{ await batch.commit(); }
+    catch(err){ showToast("Import stopped \u2014 "+(err.code||"error")+". "+ui.importProgress.done+" were added."); return; }
+    ui.importProgress = { done: Math.min(i+CHUNK, toAdd.length), total: toAdd.length };
+    render();
+  }
+  showToast("Imported "+toAdd.length+" sites (unassigned)");
 }
 
 async function createCustomerLogin(customerId){
