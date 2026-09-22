@@ -162,7 +162,11 @@ let ui = { view: null, modal: null, draftPending: null, loginError: "",
   pendingItemsCustomer: "",
   sitesCustomer: "",
   customersSearch: "", driversSearch: "", usersSearch: "", sitesSearch: "",
-  bulkEdit: false, bulkEditSites: false, bulkEditPage: 0, bulkEditSitesPage: 0, importProgress: null };
+  bulkEdit: false, bulkEditSites: false, bulkEditPage: 0, bulkEditSitesPage: 0, importProgress: null,
+  selectedCustomerIds: new Set(), selectedSiteIds: new Set(),
+  customersShowLimit: 200, sitesShowLimit: 200 };
+let visibleCustomerIds = [];
+let visibleSiteIds = [];
 
 function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function el(id){ return document.getElementById(id); }
@@ -514,12 +518,18 @@ function viewCustomers(){
       `<div class="card"><table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th></tr></thead><tbody>${rows}</tbody></table></div>${pager}`;
   }
 
+  visibleCustomerIds = list.slice(0, ui.customersShowLimit).map(c=>c.id);
+  const selCount = ui.selectedCustomerIds.size;
+  const shown = list.slice(0, ui.customersShowLimit);
+  const allSelected = shown.length>0 && shown.every(c=>ui.selectedCustomerIds.has(c.id));
   const body = !list.length ? `<div class="empty">No customers match.</div>` :
-    `<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
-    list.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
+    `<table><thead><tr>${isAdmin?`<th style="width:30px;"><input type="checkbox" data-select-all-customers ${allSelected?"checked":""}></th>`:""}<th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
+    shown.map(c=>`<tr>${isAdmin?`<td><input type="checkbox" data-select-customer="${c.id}" ${ui.selectedCustomerIds.has(c.id)?"checked":""}></td>`:""}<td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
       <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="open-customer" data-id="${c.id}">Open</button>
       ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
-  return pageHead("Customers","People and companies you deliver to", toolbar) + `<div class="card">${body}</div>`;
+  const moreBar = list.length > shown.length ? `<div style="margin-top:12px;"><button class="btn btn-sm" data-act="show-more-customers">Show 200 more (${list.length-shown.length} left)</button></div>` : "";
+  const deleteBar = (isAdmin && selCount>0) ? `<div style="margin-bottom:12px;"><button class="btn btn-danger btn-sm" data-act="delete-selected-customers">Delete ${selCount} selected</button></div>` : "";
+  return pageHead("Customers", `People and companies you deliver to \u2014 showing ${shown.length} of ${list.length}`, toolbar) + `<div class="card">${deleteBar}${body}${moreBar}</div>`;
 }
 async function saveBulkEditCustomers(onDone){
   const rows = {};
@@ -613,10 +623,15 @@ function viewSites(){
 
   if(!list.length) return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", toolbar) +
     `<div class="empty">No sites match.</div>`;
-  const body = `<table><thead><tr>${showStaffControls?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${(canEdit||canDelete)?"<th></th>":""}</tr></thead><tbody>` +
-    list.map(s=>{
+  const shown = list.slice(0, ui.sitesShowLimit);
+  visibleSiteIds = shown.map(s=>s.id);
+  const selCount = ui.selectedSiteIds.size;
+  const allSelected = canDelete && shown.length>0 && shown.every(s=>ui.selectedSiteIds.has(s.id));
+  const body = `<table><thead><tr>${canDelete?`<th style="width:30px;"><input type="checkbox" data-select-all-sites ${allSelected?"checked":""}></th>`:""}${showStaffControls?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${(canEdit||canDelete)?"<th></th>":""}</tr></thead><tbody>` +
+    shown.map(s=>{
       const cust = customerById(s.customerId);
       return `<tr>
+        ${canDelete?`<td><input type="checkbox" data-select-site="${s.id}" ${ui.selectedSiteIds.has(s.id)?"checked":""}></td>`:""}
         ${showStaffControls?`<td>${cust?esc(cust.name):'<span class="pill pill-amber">Unassigned</span>'}</td>`:""}
         <td><b>${esc(s.siteName)}</b></td>
         <td class="faint">${esc(s.address||"\u2014")}</td>
@@ -625,8 +640,10 @@ function viewSites(){
         ${(canEdit||canDelete)?`<td style="text-align:right; white-space:nowrap;">${canEdit?`<button class="btn btn-sm" data-act="edit-site" data-id="${s.id}">Edit</button>`:""} ${canDelete?`<button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button>`:""}</td>`:""}
       </tr>`;
     }).join("") + `</tbody></table>`;
-  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", toolbar) +
-    `<div class="card">${body}</div>`;
+  const moreBar = list.length > shown.length ? `<div style="margin-top:12px;"><button class="btn btn-sm" data-act="show-more-sites">Show 200 more (${list.length-shown.length} left)</button></div>` : "";
+  const deleteBar = (canDelete && selCount>0) ? `<div style="margin-bottom:12px;"><button class="btn btn-danger btn-sm" data-act="delete-selected-sites">Delete ${selCount} selected</button></div>` : "";
+  return pageHead(profile.role==="customer"?"My sites":"Site locations", `Delivery sites with their location and on-site contact \u2014 showing ${shown.length} of ${list.length}`, toolbar) +
+    `<div class="card">${deleteBar}${body}${moreBar}</div>`;
 }
 
 async function saveBulkEditSites(onDone){
@@ -1049,17 +1066,27 @@ function bindShell(){
   if(out) out.addEventListener("click", ()=>signOut(auth));
   const main = el("main");
   main.addEventListener("click", mainClickHandler);
+  main.addEventListener("change", e=>{
+    const cb = e.target.closest("[data-select-customer]");
+    if(cb){ const id=cb.getAttribute("data-select-customer"); if(cb.checked) ui.selectedCustomerIds.add(id); else ui.selectedCustomerIds.delete(id); render(); return; }
+    const sb = e.target.closest("[data-select-site]");
+    if(sb){ const id=sb.getAttribute("data-select-site"); if(sb.checked) ui.selectedSiteIds.add(id); else ui.selectedSiteIds.delete(id); render(); return; }
+    const allC = e.target.closest("[data-select-all-customers]");
+    if(allC){ if(allC.checked) visibleCustomerIds.forEach(id=>ui.selectedCustomerIds.add(id)); else visibleCustomerIds.forEach(id=>ui.selectedCustomerIds.delete(id)); render(); return; }
+    const allS = e.target.closest("[data-select-all-sites]");
+    if(allS){ if(allS.checked) visibleSiteIds.forEach(id=>ui.selectedSiteIds.add(id)); else visibleSiteIds.forEach(id=>ui.selectedSiteIds.delete(id)); render(); return; }
+  });
   bindSearchInput("overview-search", v=>{ ui.overviewSearch = v; });
   bindSearchInput("invoices-search", v=>{ ui.invoicesSearch = v; });
-  bindSearchInput("customers-search", v=>{ ui.customersSearch = v; ui.bulkEditPage = 0; });
+  bindSearchInput("customers-search", v=>{ ui.customersSearch = v; ui.bulkEditPage = 0; ui.customersShowLimit = 200; });
   bindSearchInput("drivers-search", v=>{ ui.driversSearch = v; });
   bindSearchInput("users-search", v=>{ ui.usersSearch = v; });
-  bindSearchInput("sites-search", v=>{ ui.sitesSearch = v; ui.bulkEditSitesPage = 0; });
+  bindSearchInput("sites-search", v=>{ ui.sitesSearch = v; ui.bulkEditSitesPage = 0; ui.sitesShowLimit = 200; });
   bindFilterSelect("overview-status", v=>{ ui.overviewStatus = v; });
   bindFilterSelect("invoices-status", v=>{ ui.invoicesStatus = v; });
   bindFilterSelect("pendingorders-status", v=>{ ui.pendingOrdersStatus = v; });
   bindFilterSelect("pending-customer-filter", v=>{ ui.pendingItemsCustomer = v; });
-  bindFilterSelect("sites-customer-filter", v=>{ ui.sitesCustomer = v; ui.bulkEditSitesPage = 0; });
+  bindFilterSelect("sites-customer-filter", v=>{ ui.sitesCustomer = v; ui.bulkEditSitesPage = 0; ui.sitesShowLimit = 200; });
   const modalBg = document.querySelector(".modal-bg");
   if(modalBg){
     modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
@@ -1135,6 +1162,10 @@ function mainClickHandler(e){
   if(act==="open-import-sites"){ ui.modal={type:"import-sites"}; ui.importProgress=null; render(); return; }
   if(act==="bulk-edit-page"){ saveBulkEditCustomers(()=>{ ui.bulkEditPage += parseInt(b.getAttribute("data-dir"),10); render(); }); return; }
   if(act==="bulk-edit-sites-page"){ saveBulkEditSites(()=>{ ui.bulkEditSitesPage += parseInt(b.getAttribute("data-dir"),10); render(); }); return; }
+  if(act==="delete-selected-customers"){ deleteSelectedCustomers(); return; }
+  if(act==="delete-selected-sites"){ deleteSelectedSites(); return; }
+  if(act==="show-more-customers"){ ui.customersShowLimit += 200; render(); return; }
+  if(act==="show-more-sites"){ ui.sitesShowLimit += 200; render(); return; }
   if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
   else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
@@ -1423,6 +1454,48 @@ async function runSiteImport(names){
     render();
   }
   showToast("Imported "+toAdd.length+" sites (unassigned)");
+}
+
+async function deleteSelectedCustomers(){
+  const ids = Array.from(ui.selectedCustomerIds);
+  if(!ids.length) return;
+  if(!confirm("Delete "+ids.length+" customer"+(ids.length===1?"":"s")+"? This cannot be undone \u2014 their sites and logins will be left behind, unlinked.")) return;
+  const CHUNK = 450;
+  try{
+    for(let i=0;i<ids.length;i+=CHUNK){
+      const batch = writeBatch(db);
+      ids.slice(i,i+CHUNK).forEach(id=>batch.delete(doc(db,"customers",id)));
+      await batch.commit();
+    }
+    showToast("Deleted "+ids.length+" customer"+(ids.length===1?"":"s"));
+    ui.selectedCustomerIds = new Set();
+    render();
+  }catch(err){
+    showToast("Could not finish deleting \u2014 "+(err.code||"try again"));
+    ui.selectedCustomerIds = new Set();
+    render();
+  }
+}
+
+async function deleteSelectedSites(){
+  const ids = Array.from(ui.selectedSiteIds);
+  if(!ids.length) return;
+  if(!confirm("Delete "+ids.length+" site"+(ids.length===1?"":"s")+"? This cannot be undone.")) return;
+  const CHUNK = 450;
+  try{
+    for(let i=0;i<ids.length;i+=CHUNK){
+      const batch = writeBatch(db);
+      ids.slice(i,i+CHUNK).forEach(id=>batch.delete(doc(db,"sites",id)));
+      await batch.commit();
+    }
+    showToast("Deleted "+ids.length+" site"+(ids.length===1?"":"s"));
+    ui.selectedSiteIds = new Set();
+    render();
+  }catch(err){
+    showToast("Could not finish deleting \u2014 "+(err.code||"try again"));
+    ui.selectedSiteIds = new Set();
+    render();
+  }
 }
 
 async function createCustomerLogin(customerId){
