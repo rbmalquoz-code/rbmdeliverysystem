@@ -162,7 +162,7 @@ let ui = { view: null, modal: null, draftPending: null, loginError: "",
   pendingItemsCustomer: "",
   sitesCustomer: "",
   customersSearch: "", driversSearch: "", usersSearch: "", sitesSearch: "",
-  bulkEdit: false, bulkEditSites: false, importProgress: null };
+  bulkEdit: false, bulkEditSites: false, bulkEditPage: 0, bulkEditSitesPage: 0, importProgress: null };
 
 function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function el(id){ return document.getElementById(id); }
@@ -493,17 +493,26 @@ function viewCustomers(){
 
   if(ui.bulkEdit){
     if(!list.length) return pageHead("Customers \u2014 bulk edit","Nothing matches this search", toolbar) + `<div class="empty">No customers match.</div>`;
-    if(list.length > BULK_EDIT_CAP) return pageHead("Customers \u2014 bulk edit","Narrow your search first", toolbar) +
-      `<div class="empty">${list.length} customers match \u2014 bulk edit works on up to ${BULK_EDIT_CAP} at a time. Use search to narrow it down first.</div>`;
-    const rows = list.map(c=>`<tr>
+    const page = ui.bulkEditPage||0;
+    const start = page*BULK_EDIT_CAP;
+    const pageList = list.slice(start, start+BULK_EDIT_CAP);
+    const hasPrev = page>0, hasNext = start+BULK_EDIT_CAP < list.length;
+    const rows = pageList.map(c=>`<tr>
       <td><input data-bulk-field="name" data-id="${c.id}" value="${esc(c.name)}"></td>
       <td><input data-bulk-field="company" data-id="${c.id}" value="${esc(c.company||"")}"></td>
       <td><input data-bulk-field="phone" data-id="${c.id}" value="${esc(c.phone||"")}"></td>
       <td><input data-bulk-field="address" data-id="${c.id}" value="${esc(c.address||"")}"></td>
     </tr>`).join("");
-    return pageHead("Customers \u2014 bulk edit", `Editing ${list.length} customer${list.length===1?"":"s"} \u2014 change any field, then save`, toolbar) +
-      `<div class="card"><table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="modal-actions" style="justify-content:flex-start; margin-top:14px;"><button class="btn btn-primary" data-act="save-bulk-edit">Save changes</button></div>`;
+    const pager = `<div style="display:flex; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn btn-primary" data-act="save-bulk-edit">Save changes</button>
+      <span class="faint">Showing ${start+1}\u2013${start+pageList.length} of ${list.length}</span>
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        ${hasPrev?`<button class="btn btn-sm" data-act="bulk-edit-page" data-dir="-1">&larr; Previous 200</button>`:""}
+        ${hasNext?`<button class="btn btn-sm" data-act="bulk-edit-page" data-dir="1">Next 200 &rarr;</button>`:""}
+      </div>
+    </div>`;
+    return pageHead("Customers \u2014 bulk edit", `Editing ${pageList.length} of ${list.length} customer${list.length===1?"":"s"} \u2014 change any field, then save`, toolbar) +
+      `<div class="card"><table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th></tr></thead><tbody>${rows}</tbody></table></div>${pager}`;
   }
 
   const body = !list.length ? `<div class="empty">No customers match.</div>` :
@@ -513,7 +522,7 @@ function viewCustomers(){
       ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
   return pageHead("Customers","People and companies you deliver to", toolbar) + `<div class="card">${body}</div>`;
 }
-async function saveBulkEditCustomers(){
+async function saveBulkEditCustomers(onDone){
   const rows = {};
   document.querySelectorAll("[data-bulk-field]").forEach(f=>{
     const id = f.getAttribute("data-id");
@@ -531,12 +540,11 @@ async function saveBulkEditCustomers(){
     ["name","company","phone","address"].forEach(f=>{ if((orig[f]||"") !== (next[f]||"")) diff[f] = next[f]; });
     if(Object.keys(diff).length){ batch.update(doc(db,"customers",id), diff); changed++; }
   });
-  if(!changed){ showToast("No changes to save"); ui.bulkEdit=false; render(); return; }
+  if(!changed){ if(onDone){ onDone(); } else { showToast("No changes to save"); ui.bulkEdit=false; render(); } return; }
   try{
     await batch.commit();
     showToast("Saved "+changed+" customer"+(changed===1?"":"s"));
-    ui.bulkEdit = false;
-    render();
+    if(onDone){ onDone(); } else { ui.bulkEdit = false; render(); }
   }catch(err){
     showToast("Could not save \u2014 "+(err.code||"try again"));
   }
@@ -579,20 +587,29 @@ function viewSites(){
 
   if(ui.bulkEditSites){
     if(!list.length) return pageHead("Sites \u2014 bulk edit","Nothing matches this filter", toolbar) + `<div class="empty">No sites match.</div>`;
-    if(list.length > BULK_EDIT_CAP) return pageHead("Sites \u2014 bulk edit","Narrow your search first", toolbar) +
-      `<div class="empty">${list.length} sites match \u2014 bulk edit works on up to ${BULK_EDIT_CAP} at a time. Use search or the customer filter to narrow it down first.</div>`;
+    const page = ui.bulkEditSitesPage||0;
+    const start = page*BULK_EDIT_CAP;
+    const pageList = list.slice(start, start+BULK_EDIT_CAP);
+    const hasPrev = page>0, hasNext = start+BULK_EDIT_CAP < list.length;
     const custOptionsFor = (selectedId)=> `<option value="" ${!selectedId?"selected":""}>Unassigned</option>` +
       state.customers.map(c=>`<option value="${c.id}" ${selectedId===c.id?"selected":""}>${esc(c.name)}</option>`).join("");
-    const rows = list.map(s=>`<tr>
+    const rows = pageList.map(s=>`<tr>
       <td><select data-bulk-site-field="customerId" data-id="${s.id}">${custOptionsFor(s.customerId||"")}</select></td>
       <td><input data-bulk-site-field="siteName" data-id="${s.id}" value="${esc(s.siteName)}"></td>
       <td><input data-bulk-site-field="address" data-id="${s.id}" value="${esc(s.address||"")}"></td>
       <td><input data-bulk-site-field="supervisorName" data-id="${s.id}" value="${esc(s.supervisorName||"")}"></td>
       <td><input data-bulk-site-field="supervisorPhone" data-id="${s.id}" value="${esc(s.supervisorPhone||"")}"></td>
     </tr>`).join("");
-    return pageHead("Sites \u2014 bulk edit", `Editing ${list.length} site${list.length===1?"":"s"} \u2014 assign a customer or change any field, then save`, toolbar) +
-      `<div class="card" style="overflow-x:auto;"><table><thead><tr><th>Customer</th><th>Site</th><th>Address</th><th>Supervisor</th><th>Phone</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="modal-actions" style="justify-content:flex-start; margin-top:14px;"><button class="btn btn-primary" data-act="save-bulk-edit-sites">Save changes</button></div>`;
+    const pager = `<div style="display:flex; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn btn-primary" data-act="save-bulk-edit-sites">Save changes</button>
+      <span class="faint">Showing ${start+1}\u2013${start+pageList.length} of ${list.length}</span>
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        ${hasPrev?`<button class="btn btn-sm" data-act="bulk-edit-sites-page" data-dir="-1">&larr; Previous 200</button>`:""}
+        ${hasNext?`<button class="btn btn-sm" data-act="bulk-edit-sites-page" data-dir="1">Next 200 &rarr;</button>`:""}
+      </div>
+    </div>`;
+    return pageHead("Sites \u2014 bulk edit", `Editing ${pageList.length} of ${list.length} site${list.length===1?"":"s"} \u2014 assign a customer or change any field, then save`, toolbar) +
+      `<div class="card" style="overflow-x:auto;"><table><thead><tr><th>Customer</th><th>Site</th><th>Address</th><th>Supervisor</th><th>Phone</th></tr></thead><tbody>${rows}</tbody></table></div>${pager}`;
   }
 
   if(!list.length) return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", toolbar) +
@@ -613,7 +630,7 @@ function viewSites(){
     `<div class="card">${body}</div>`;
 }
 
-async function saveBulkEditSites(){
+async function saveBulkEditSites(onDone){
   const rows = {};
   document.querySelectorAll("[data-bulk-site-field]").forEach(f=>{
     const id = f.getAttribute("data-id");
@@ -633,12 +650,11 @@ async function saveBulkEditSites(){
     if((orig.customerId||null) !== nextCustomerId) diff.customerId = nextCustomerId;
     if(Object.keys(diff).length){ batch.update(doc(db,"sites",id), diff); changed++; }
   });
-  if(!changed){ showToast("No changes to save"); ui.bulkEditSites=false; render(); return; }
+  if(!changed){ if(onDone){ onDone(); } else { showToast("No changes to save"); ui.bulkEditSites=false; render(); } return; }
   try{
     await batch.commit();
     showToast("Saved "+changed+" site"+(changed===1?"":"s"));
-    ui.bulkEditSites = false;
-    render();
+    if(onDone){ onDone(); } else { ui.bulkEditSites = false; render(); }
   }catch(err){
     showToast("Could not save \u2014 "+(err.code||"try again"));
   }
@@ -1036,15 +1052,15 @@ function bindShell(){
   main.addEventListener("click", mainClickHandler);
   bindSearchInput("overview-search", v=>{ ui.overviewSearch = v; });
   bindSearchInput("invoices-search", v=>{ ui.invoicesSearch = v; });
-  bindSearchInput("customers-search", v=>{ ui.customersSearch = v; });
+  bindSearchInput("customers-search", v=>{ ui.customersSearch = v; ui.bulkEditPage = 0; });
   bindSearchInput("drivers-search", v=>{ ui.driversSearch = v; });
   bindSearchInput("users-search", v=>{ ui.usersSearch = v; });
-  bindSearchInput("sites-search", v=>{ ui.sitesSearch = v; });
+  bindSearchInput("sites-search", v=>{ ui.sitesSearch = v; ui.bulkEditSitesPage = 0; });
   bindFilterSelect("overview-status", v=>{ ui.overviewStatus = v; });
   bindFilterSelect("invoices-status", v=>{ ui.invoicesStatus = v; });
   bindFilterSelect("pendingorders-status", v=>{ ui.pendingOrdersStatus = v; });
   bindFilterSelect("pending-customer-filter", v=>{ ui.pendingItemsCustomer = v; });
-  bindFilterSelect("sites-customer-filter", v=>{ ui.sitesCustomer = v; });
+  bindFilterSelect("sites-customer-filter", v=>{ ui.sitesCustomer = v; ui.bulkEditSitesPage = 0; });
   const modalBg = document.querySelector(".modal-bg");
   if(modalBg){
     modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
@@ -1112,12 +1128,14 @@ function mainClickHandler(e){
   const b = e.target.closest("[data-act]");
   if(!b) return;
   const act = b.getAttribute("data-act");
-  if(act==="toggle-bulk-edit"){ ui.bulkEdit = !ui.bulkEdit; render(); return; }
+  if(act==="toggle-bulk-edit"){ ui.bulkEdit = !ui.bulkEdit; ui.bulkEditPage=0; render(); return; }
   if(act==="save-bulk-edit"){ saveBulkEditCustomers(); return; }
   if(act==="open-import-customers"){ ui.modal={type:"import-customers"}; ui.importProgress=null; render(); return; }
-  if(act==="toggle-bulk-edit-sites"){ ui.bulkEditSites = !ui.bulkEditSites; render(); return; }
+  if(act==="toggle-bulk-edit-sites"){ ui.bulkEditSites = !ui.bulkEditSites; ui.bulkEditSitesPage=0; render(); return; }
   if(act==="save-bulk-edit-sites"){ saveBulkEditSites(); return; }
   if(act==="open-import-sites"){ ui.modal={type:"import-sites"}; ui.importProgress=null; render(); return; }
+  if(act==="bulk-edit-page"){ saveBulkEditCustomers(()=>{ ui.bulkEditPage += parseInt(b.getAttribute("data-dir"),10); render(); }); return; }
+  if(act==="bulk-edit-sites-page"){ saveBulkEditSites(()=>{ ui.bulkEditSitesPage += parseInt(b.getAttribute("data-dir"),10); render(); }); return; }
   if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
   else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
