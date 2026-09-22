@@ -1151,9 +1151,11 @@ function bindCustomerFilterPicker(searchId, resultsId, opts){
     results.querySelectorAll("[data-pick]").forEach(btn=>{
       btn.addEventListener("mousedown", (e)=>{
         e.preventDefault();
+        e.stopPropagation();
         results.style.display = "none";
         opts.onSelect(btn.getAttribute("data-pick"));
       });
+      btn.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); });
     });
   }
   search.addEventListener("focus", ()=>showResults(search.value));
@@ -1254,10 +1256,12 @@ function bindCustomerPicker(searchId, hiddenId, resultsId, emptyLabel){
     results.querySelectorAll("[data-pick]").forEach(btn=>{
       btn.addEventListener("mousedown", (e)=>{
         e.preventDefault();
+        e.stopPropagation();
         hidden.value = btn.getAttribute("data-pick");
         search.value = btn.getAttribute("data-name")||"";
         results.style.display = "none";
       });
+      btn.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); });
     });
   }
   search.addEventListener("focus", ()=>showResults(search.value));
