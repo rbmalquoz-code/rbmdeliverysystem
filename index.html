@@ -152,7 +152,7 @@ const NEXT_STATUS = { ordered:"getting_ready", getting_ready:"in_transit", in_tr
 const NEXT_LABEL = { ordered:"Start getting ready", getting_ready:"Mark in transit", in_transit:"Mark delivered" };
 
 let profile = null;
-let state = { customers: [], drivers: [], invoices: [], users: [] };
+let state = { customers: [], drivers: [], invoices: [], users: [], sites: [] };
 let unsubs = [];
 let ui = { view: null, modal: null, draftPending: null, loginError: "" };
 
@@ -164,6 +164,8 @@ function fmtDateTime(ts){ if(!ts) return ""; return new Date(ts).toLocaleString(
 function showToast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); }
 function customerById(id){ return state.customers.find(c=>c.id===id); }
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
+function siteById(id){ return state.sites.find(s=>s.id===id); }
+function sitesOfCustomer(cid){ return state.sites.filter(s=>s.customerId===cid); }
 function pendingOf(inv){ return (inv.pendingItems||[]).filter(p=>!p.fulfilled); }
 function waLink(phone, text){ const digits=String(phone||"").replace(/[^0-9]/g,""); return "https://wa.me/"+digits+"?text="+encodeURIComponent(text); }
 function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
@@ -216,6 +218,13 @@ function startListeners(){
   unsubs.push(onSnapshot(collection(db,"drivers"), snap=>{ state.drivers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
 
   if(role==="customer"){
+    const siteQ = query(collection(db,"sites"), where("customerId","==",profile.customerId));
+    unsubs.push(onSnapshot(siteQ, snap=>{ state.sites = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  } else {
+    unsubs.push(onSnapshot(collection(db,"sites"), snap=>{ state.sites = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  }
+
+  if(role==="customer"){
     const invQ = query(collection(db,"invoices"), where("customerId","==",profile.customerId));
     unsubs.push(onSnapshot(invQ, snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   } else if(role==="driver"){
@@ -266,10 +275,10 @@ function bindLogin(){
 /* ---------------- shell ---------------- */
 
 function navItemsFor(role){
-  if(role==="admin") return [["live","Live dashboard"],["overview","Overview"],["pendingorders","Pending orders"],["invoices","Invoices"],["pending","Pending items"],["customers","Customers"],["drivers","Drivers"],["users","Users & roles"]];
-  if(role==="warehouse") return [["queue","Invoices"],["pendingorders","Pending orders"],["pending","Pending items"]];
-  if(role==="driver") return [["mydeliveries","My deliveries"]];
-  return [["myorders","My orders"]];
+  if(role==="admin") return [["live","Live dashboard"],["overview","Overview"],["pendingorders","Pending orders"],["invoices","Invoices"],["pending","Pending items"],["sites","Site locations"],["customers","Customers"],["drivers","Drivers"],["users","Users & roles"]];
+  if(role==="warehouse") return [["queue","Invoices"],["pendingorders","Pending orders"],["pending","Pending items"],["sites","Site locations"]];
+  if(role==="driver") return [["mydeliveries","My deliveries"],["sites","Site locations"]];
+  return [["myorders","My orders"],["sites","My sites"]];
 }
 
 function renderShell(){
@@ -299,6 +308,7 @@ function renderView(){
     if(ui.view==="pendingorders") return viewPendingOrders();
     if(ui.view==="invoices") return viewInvoicesAdmin();
     if(ui.view==="pending") return viewPending();
+    if(ui.view==="sites") return viewSites();
     if(ui.view==="customers") return viewCustomers();
     if(ui.view==="drivers") return viewDrivers();
     if(ui.view==="users") return viewUsers();
@@ -307,12 +317,15 @@ function renderView(){
     if(ui.view==="queue") return viewQueueWarehouse();
     if(ui.view==="pendingorders") return viewPendingOrders();
     if(ui.view==="pending") return viewPending();
+    if(ui.view==="sites") return viewSites();
   }
   if(role==="driver"){
     if(ui.view==="mydeliveries") return viewMyDeliveries();
+    if(ui.view==="sites") return viewSites();
   }
   if(role==="customer"){
     if(ui.view==="myorders") return viewMyOrders();
+    if(ui.view==="sites") return viewSites();
   }
   return "";
 }
@@ -420,6 +433,30 @@ function viewDrivers(){
   return pageHead("Truck drivers","Drivers you can assign to a delivery, and link to a driver login", `<button class="btn btn-primary" data-act="new-driver">Add driver</button>`) + `<div class="card">${body}</div>`;
 }
 
+/* ---------------- sites (visible to every role) ---------------- */
+
+function viewSites(){
+  const canManage = profile.role==="admin" || profile.role==="warehouse";
+  const list = state.sites.slice().sort((a,b)=>(a.siteName||"").localeCompare(b.siteName||""));
+  if(!list.length) return pageHead("Site locations","Delivery sites with their location and on-site contact", canManage ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
+    `<div class="empty">No sites saved yet.</div>`;
+  const showCustomerCol = profile.role!=="customer";
+  const body = `<table><thead><tr>${showCustomerCol?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${canManage?"<th></th>":""}</tr></thead><tbody>` +
+    list.map(s=>{
+      const cust = customerById(s.customerId);
+      return `<tr>
+        ${showCustomerCol?`<td>${esc(cust?cust.name:"\u2014")}</td>`:""}
+        <td><b>${esc(s.siteName)}</b></td>
+        <td class="faint">${esc(s.address||"\u2014")}</td>
+        <td>${esc(s.supervisorName||"\u2014")}${s.supervisorPhone?`<br><span class="faint">${esc(s.supervisorPhone)}</span>`:""}</td>
+        <td>${s.mapLink?`<a href="${esc(s.mapLink)}" target="_blank" rel="noopener" class="btn btn-sm">Open map</a>`:'<span class="faint">\u2014</span>'}</td>
+        ${canManage?`<td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-site" data-id="${s.id}">Edit</button> <button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button></td>`:""}
+      </tr>`;
+    }).join("") + `</tbody></table>`;
+  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", canManage ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
+    `<div class="card">${body}</div>`;
+}
+
 /* ---------------- users & roles (admin) ---------------- */
 
 function viewUsers(){
@@ -451,6 +488,11 @@ function viewMyDeliveries(){
       <p style="margin-top:12px;"><b>${esc(cust?cust.name:"\u2014")}</b>${cust&&cust.company?" \u2014 "+esc(cust.company):""}</p>
       ${cust&&cust.address ? `<p class="faint" style="margin-top:2px;">${esc(cust.address)}</p>` : ""}
       ${cust&&cust.phone ? `<p class="faint" style="margin-top:2px;">${esc(cust.phone)}</p>` : ""}
+      ${(()=>{ const site = inv.siteId ? siteById(inv.siteId) : null; if(!site) return ""; return `<div style="margin-top:10px; padding:10px 12px; background:var(--surface-2); border-radius:8px;">
+        <b>${esc(site.siteName)}</b>${site.address?`<br><span class="faint">${esc(site.address)}</span>`:""}
+        ${site.supervisorName?`<br>Contact: ${esc(site.supervisorName)}${site.supervisorPhone?" \u00b7 "+esc(site.supervisorPhone):""}`:""}
+        ${site.mapLink?`<br><a class="btn btn-sm" style="margin-top:6px;" href="${esc(site.mapLink)}" target="_blank" rel="noopener">Open map</a>`:""}
+      </div>`; })()}
       <p style="margin-top:10px;">${inv.totalItems||0} items total${pend?`, ${pend} pending`:""}</p>
       ${canGo ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;" data-act="driver-in-transit" data-inv="${inv.id}">Mark in transit</button>` : `<p class="faint" style="margin-top:12px;">Already on the way or delivered.</p>`}
     </div>`;
@@ -474,6 +516,10 @@ function viewMyOrders(){
       <p style="margin-top:12px;">${inv.totalItems||0} items total${pend.length?`, <span style="color:var(--rust);">${pend.length} pending</span>`:", all ready"}</p>
       ${pend.length ? `<div style="margin-top:10px;">${pend.map(p=>`<div class="itemline"><span class="name">Item ${esc(p.itemNumber)}${p.note?" \u2014 "+esc(p.note):""}</span><span class="pill pill-rust">pending</span></div>`).join("")}</div>` : ""}
       ${showDriver ? `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+esc(driver.phone):""}</p>` : ""}
+      ${(()=>{ const site = inv.siteId ? siteById(inv.siteId) : null; if(!site) return ""; return `<div style="margin-top:10px; padding:10px 12px; background:var(--surface-2); border-radius:8px;">
+        <b>${esc(site.siteName)}</b>${site.address?`<br><span class="faint">${esc(site.address)}</span>`:""}
+        ${site.supervisorName?`<br>Site contact: ${esc(site.supervisorName)}${site.supervisorPhone?" \u00b7 "+esc(site.supervisorPhone):""}`:""}
+      </div>`; })()}
       ${inv.notes ? `<p class="faint" style="margin-top:6px;">Note: ${esc(inv.notes)}</p>` : ""}
     </div>`;
   }).join("");
@@ -491,6 +537,8 @@ function renderModal(){
   if(m.type==="new-invoice") inner = newInvoiceForm();
   if(m.type==="new-user") inner = userForm(null);
   if(m.type==="edit-user") inner = userForm(state.users.find(u=>u.id===m.id));
+  if(m.type==="new-site") inner = siteForm(null);
+  if(m.type==="edit-site") inner = siteForm(siteById(m.id));
   if(m.type==="open-invoice") inner = invoiceDetail(m.id);
   return `<div class="modal-bg" data-act="close-modal-bg"><div class="modal">${inner}</div></div>`;
 }
@@ -510,6 +558,10 @@ function driverForm(d){
     <div class="field"><label>Vehicle / plate</label><input id="f-vehicle" value="${d?esc(d.vehicle||""):""}" placeholder="e.g. Truck 4, DXB-12345"></div>
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-driver" data-id="${d?d.id:""}">${d?"Save changes":"Add driver"}</button></div>`;
 }
+function siteOptionsHtml(customerId, selectedId){
+  const list = sitesOfCustomer(customerId);
+  return `<option value="">No specific site</option>` + list.map(s=>`<option value="${s.id}" ${s.id===selectedId?"selected":""}>${esc(s.siteName)}</option>`).join("");
+}
 function newInvoiceForm(){
   if(!state.customers.length){
     return `<h2>New invoice</h2><p class="muted">No customers on file yet \u2014 ask an admin to add one.</p>
@@ -517,10 +569,12 @@ function newInvoiceForm(){
   }
   const custOptions = state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
   const driverOptions = `<option value="">Assign later</option>` + state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
+  const firstCustId = state.customers[0].id;
   return `<h2>New invoice</h2>
     <div class="field"><label>Invoice number (from the counter)</label><input id="f-invnum" placeholder="e.g. INV-4021"></div>
     <div class="field"><label>DO number</label><input id="f-donum" placeholder="e.g. DO-1187"></div>
     <div class="field"><label>Customer</label><select id="f-customer">${custOptions}</select></div>
+    <div class="field"><label>Delivery site (optional)</label><select id="f-site">${siteOptionsHtml(firstCustId, null)}</select></div>
     <div class="field"><label>Total items on invoice</label><input id="f-total" type="number" min="1" placeholder="e.g. 20"></div>
     <div class="field"><label>Driver (optional, can assign later)</label><select id="f-driver-new">${driverOptions}</select></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2"></textarea></div>
@@ -546,6 +600,19 @@ function userForm(u){
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-user" data-id="${u?u.id:""}">${u?"Save changes":"Create login"}</button></div>`;
 }
 
+function siteForm(s){
+  const custOptions = state.customers.map(c=>`<option value="${c.id}" ${s&&s.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
+  return `<h2>${s?"Edit site":"Add site"}</h2>
+    <div class="field"><label>Customer</label><select id="f-customer">${custOptions}</select></div>
+    <div class="field"><label>Site name</label><input id="f-sitename" value="${s?esc(s.siteName):""}" placeholder="e.g. Villa 12, Al Barsha site"></div>
+    <div class="field"><label>Address</label><input id="f-address" value="${s?esc(s.address||""):""}" placeholder="Street / area / emirate"></div>
+    <div class="field"><label>Google Maps link</label><input id="f-maplink" value="${s?esc(s.mapLink||""):""}" placeholder="Paste a Google Maps share link"></div>
+    <div class="field"><label>Site supervisor / receiver name</label><input id="f-supname" value="${s?esc(s.supervisorName||""):""}" placeholder="Who receives the delivery on site"></div>
+    <div class="field"><label>Their phone</label><input id="f-supphone" value="${s?esc(s.supervisorPhone||""):""}" placeholder="+9715xxxxxxxx"></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-site" data-id="${s?s.id:""}">${s?"Save changes":"Add site"}</button></div>`;
+}
+
+
 function invoiceDetail(id){
   const inv = state.invoices.find(i=>i.id===id);
   if(!inv) return `<p>Not found.</p><div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
@@ -570,10 +637,21 @@ function invoiceDetail(id){
     body += `<div class="field"><label>Invoice number</label><input id="f-invnum-e" value="${esc(inv.invoiceNumber)}"></div>
       <div class="field"><label>DO number</label><input id="f-donum-e" value="${esc(inv.doNumber||"")}"></div>
       <div class="field"><label>Customer</label><select id="f-customer-e">${custOptions}</select></div>
+      <div class="field"><label>Delivery site</label><select id="f-site-e">${siteOptionsHtml(inv.customerId, inv.siteId||null)}</select></div>
       <div class="field"><label>Total items</label><input id="f-total-e" type="number" min="0" value="${inv.totalItems||0}"></div>`;
   } else if(profile.role!=="customer" && profile.role!=="driver") {
     body += `<p style="margin-bottom:14px;">${inv.totalItems||0} items total</p>`;
   }
+
+  const site = inv.siteId ? siteById(inv.siteId) : null;
+  if(site){
+    body += `<div class="card" style="margin-bottom:14px; padding:12px 14px;">
+      <b>${esc(site.siteName)}</b>${site.address?`<p class="faint" style="margin-top:2px;">${esc(site.address)}</p>`:""}
+      ${site.supervisorName?`<p style="margin-top:6px;">Site contact: ${esc(site.supervisorName)}${site.supervisorPhone?" \u00b7 "+esc(site.supervisorPhone):""}</p>`:""}
+      ${site.mapLink?`<a class="btn btn-sm" style="margin-top:8px;" href="${esc(site.mapLink)}" target="_blank" rel="noopener">Open map</a>`:""}
+    </div>`;
+  }
+
 
   if(isAdmin || isWarehouse){
     const nextKey = NEXT_STATUS[inv.status];
@@ -625,6 +703,16 @@ function bindShell(){
       const sync = ()=>{ el("f-customer-wrap").style.display = roleSel.value==="customer" ? "block":"none"; el("f-driver-wrap").style.display = roleSel.value==="driver" ? "block":"none"; };
       roleSel.addEventListener("change", sync); sync();
     }
+    const newCustSel = el("f-customer");
+    const newSiteSel = el("f-site");
+    if(newCustSel && newSiteSel && !el("f-invnum-e")){
+      newCustSel.addEventListener("change", ()=>{ newSiteSel.innerHTML = siteOptionsHtml(newCustSel.value, null); });
+    }
+    const editCustSel = el("f-customer-e");
+    const editSiteSel = el("f-site-e");
+    if(editCustSel && editSiteSel){
+      editCustSel.addEventListener("change", ()=>{ editSiteSel.innerHTML = siteOptionsHtml(editCustSel.value, null); });
+    }
   }
 }
 
@@ -641,6 +729,9 @@ function mainClickHandler(e){
   else if(act==="edit-driver"){ ui.modal={type:"edit-driver", id:b.getAttribute("data-id")}; render(); }
   else if(act==="new-user"){ ui.modal={type:"new-user"}; render(); }
   else if(act==="edit-user"){ ui.modal={type:"edit-user", id:b.getAttribute("data-id")}; render(); }
+  else if(act==="new-site"){ ui.modal={type:"new-site"}; render(); }
+  else if(act==="edit-site"){ ui.modal={type:"edit-site", id:b.getAttribute("data-id")}; render(); }
+  else if(act==="del-site"){ if(confirm("Remove this site?")) deleteDoc(doc(db,"sites",b.getAttribute("data-id"))); }
   else if(act==="del-customer"){ if(confirm("Remove this customer?")) deleteDoc(doc(db,"customers",b.getAttribute("data-id"))); }
   else if(act==="del-driver"){ if(confirm("Remove this driver?")) deleteDoc(doc(db,"drivers",b.getAttribute("data-id"))); }
   else if(act==="fulfill-item"){ fulfillItem(b.getAttribute("data-inv"), b.getAttribute("data-item")); }
@@ -672,10 +763,11 @@ async function modalClickHandler(e){
     const cid = el("f-customer").value;
     const total = parseInt(el("f-total").value,10)||0;
     const driverId = el("f-driver-new").value || null;
+    const siteId = el("f-site") ? (el("f-site").value||null) : null;
     if(!num || !cid){ showToast("Fill in invoice number and customer"); return; }
     const newInv = {
       invoiceNumber:num, doNumber:don, customerId:cid, totalItems:total, pendingItems:[],
-      status:"ordered", driverId, notes:el("f-notes").value.trim(),
+      status:"ordered", driverId, siteId, notes:el("f-notes").value.trim(),
       createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name, createdByRole:profile.role
     };
     newInv.history = [histLine("Invoice created")];
@@ -707,6 +799,20 @@ async function modalClickHandler(e){
     }catch(err){
       showToast("Could not create login \u2014 "+(err.code||"try again"));
     }
+  } else if(act==="save-site"){
+    const cid = el("f-customer").value;
+    const siteName = el("f-sitename").value.trim();
+    if(!cid || !siteName){ showToast("Pick a customer and enter a site name"); return; }
+    const data = {
+      customerId: cid, siteName,
+      address: el("f-address").value.trim(),
+      mapLink: el("f-maplink").value.trim(),
+      supervisorName: el("f-supname").value.trim(),
+      supervisorPhone: el("f-supphone").value.trim()
+    };
+    const id = b.getAttribute("data-id");
+    if(id){ await updateDoc(doc(db,"sites",id), data); } else { await addDoc(collection(db,"sites"), {...data, createdAt:Date.now(), createdByName:profile.name}); }
+    ui.modal=null; render(); showToast(id?"Site updated":"Site added");
   } else if(act==="add-pending-row"){
     ui.draftPending.items.push({ id:uid(), itemNumber:"", note:"", fulfilled:false });
     render();
@@ -730,6 +836,7 @@ async function modalClickHandler(e){
       patch.invoiceNumber = el("f-invnum-e").value.trim();
       patch.doNumber = el("f-donum-e").value.trim();
       patch.customerId = el("f-customer-e").value;
+      patch.siteId = el("f-site-e") ? (el("f-site-e").value||null) : (inv.siteId||null);
       patch.totalItems = parseInt(el("f-total-e").value,10)||0;
     }
     await updateDoc(doc(db,"invoices",invId), patch);
