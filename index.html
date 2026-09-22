@@ -40,7 +40,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--steel); outline-
 label{display:block; font-size:12px; color:var(--ink-muted); margin:0 0 4px; font-weight:500;}
 .field{margin-bottom:12px;}
 button{cursor:pointer;}
-.btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:9px 14px; font-weight:600; font-size:13px; color:var(--ink);}
+.btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:9px 14px; font-weight:600; font-size:13px; color:var(--ink); display:inline-block; text-decoration:none; line-height:1.2; vertical-align:middle;}
 .btn:hover{border-color:var(--ink-faint);}
 .btn-primary{background:var(--steel); border-color:var(--steel); color:#fff;}
 .btn-primary:hover{opacity:0.92;}
@@ -166,6 +166,13 @@ function customerById(id){ return state.customers.find(c=>c.id===id); }
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 function siteById(id){ return state.sites.find(s=>s.id===id); }
 function sitesOfCustomer(cid){ return state.sites.filter(s=>s.customerId===cid); }
+function mapUrlFor(site){
+  if(!site) return null;
+  const raw = (site.mapLink||"").trim();
+  if(raw) return /^https?:\/\//i.test(raw) ? raw : "https://"+raw;
+  if(site.address) return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(site.address);
+  return null;
+}
 function pendingOf(inv){ return (inv.pendingItems||[]).filter(p=>!p.fulfilled); }
 function waLink(phone, text){ const digits=String(phone||"").replace(/[^0-9]/g,""); return "https://wa.me/"+digits+"?text="+encodeURIComponent(text); }
 function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
@@ -449,7 +456,7 @@ function viewSites(){
         <td><b>${esc(s.siteName)}</b></td>
         <td class="faint">${esc(s.address||"\u2014")}</td>
         <td>${esc(s.supervisorName||"\u2014")}${s.supervisorPhone?`<br><span class="faint">${esc(s.supervisorPhone)}</span>`:""}</td>
-        <td>${s.mapLink?`<a href="${esc(s.mapLink)}" target="_blank" rel="noopener" class="btn btn-sm">Open map</a>`:'<span class="faint">\u2014</span>'}</td>
+        <td>${mapUrlFor(s)?`<a href="${esc(mapUrlFor(s))}" target="_blank" rel="noopener" class="btn btn-sm">Open map</a>`:'<span class="faint">\u2014</span>'}</td>
         ${canManage?`<td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-site" data-id="${s.id}">Edit</button> <button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button></td>`:""}
       </tr>`;
     }).join("") + `</tbody></table>`;
@@ -491,7 +498,7 @@ function viewMyDeliveries(){
       ${(()=>{ const site = inv.siteId ? siteById(inv.siteId) : null; if(!site) return ""; return `<div style="margin-top:10px; padding:10px 12px; background:var(--surface-2); border-radius:8px;">
         <b>${esc(site.siteName)}</b>${site.address?`<br><span class="faint">${esc(site.address)}</span>`:""}
         ${site.supervisorName?`<br>Contact: ${esc(site.supervisorName)}${site.supervisorPhone?" \u00b7 "+esc(site.supervisorPhone):""}`:""}
-        ${site.mapLink?`<br><a class="btn btn-sm" style="margin-top:6px;" href="${esc(site.mapLink)}" target="_blank" rel="noopener">Open map</a>`:""}
+        ${mapUrlFor(site)?`<br><a class="btn btn-sm" style="margin-top:6px;" href="${esc(mapUrlFor(site))}" target="_blank" rel="noopener">Open map</a>`:""}
       </div>`; })()}
       <p style="margin-top:10px;">${inv.totalItems||0} items total${pend?`, ${pend} pending`:""}</p>
       ${canGo ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;" data-act="driver-in-transit" data-inv="${inv.id}">Mark in transit</button>` : `<p class="faint" style="margin-top:12px;">Already on the way or delivered.</p>`}
@@ -648,7 +655,7 @@ function invoiceDetail(id){
     body += `<div class="card" style="margin-bottom:14px; padding:12px 14px;">
       <b>${esc(site.siteName)}</b>${site.address?`<p class="faint" style="margin-top:2px;">${esc(site.address)}</p>`:""}
       ${site.supervisorName?`<p style="margin-top:6px;">Site contact: ${esc(site.supervisorName)}${site.supervisorPhone?" \u00b7 "+esc(site.supervisorPhone):""}</p>`:""}
-      ${site.mapLink?`<a class="btn btn-sm" style="margin-top:8px;" href="${esc(site.mapLink)}" target="_blank" rel="noopener">Open map</a>`:""}
+      ${mapUrlFor(site)?`<a class="btn btn-sm" style="margin-top:8px;" href="${esc(mapUrlFor(site))}" target="_blank" rel="noopener">Open map</a>`:""}
     </div>`;
   }
 
