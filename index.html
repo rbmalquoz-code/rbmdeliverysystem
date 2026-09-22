@@ -877,7 +877,7 @@ function newInvoiceForm(){
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-invoice">Create invoice</button></div>`;
 }
 function userForm(u){
-  const custOptions = state.customers.map(c=>`<option value="${c.id}" ${u&&u.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
+  const linkedCust = u && u.customerId ? customerById(u.customerId) : null;
   const drvOptions = state.drivers.map(d=>`<option value="${d.id}" ${u&&u.driverId===d.id?"selected":""}>${esc(d.name)}</option>`).join("");
   const role = u ? u.role : "warehouse";
   return `<h2>${u?"Edit user":"Add user"}</h2>
@@ -892,7 +892,12 @@ function userForm(u){
       <option value="customer" ${role==="customer"?"selected":""}>Customer</option>
       <option value="admin" ${role==="admin"?"selected":""}>Admin</option>
     </select></div>
-    <div class="field" id="f-customer-wrap"><label>Linked customer</label><select id="f-customer-link"><option value="">\u2014</option>${custOptions}</select></div>
+    <div class="field" id="f-customer-wrap" style="position:relative;">
+      <label>Linked customer</label>
+      <input id="f-customerlink-search" autocomplete="off" placeholder="Search customer" value="${linkedCust?esc(linkedCust.name):""}">
+      <input type="hidden" id="f-customer-link" value="${linkedCust?linkedCust.id:""}">
+      <div id="f-customerlink-results" class="searchlist" style="display:none; position:absolute; z-index:6; width:100%; background:var(--surface);"></div>
+    </div>
     <div class="field" id="f-driver-wrap"><label>Linked driver</label><select id="f-driver-link"><option value="">\u2014</option>${drvOptions}</select></div>
     <div class="modal-actions" style="justify-content:space-between;">
       ${u && u.email ? `<button class="btn btn-sm" data-act="reset-password" data-email="${esc(u.email)}">Send password reset email</button>` : `<span></span>`}
@@ -1227,20 +1232,21 @@ function bindShell(){
       newDrvSel.addEventListener("change", ()=>{ if(newDrvSel.value) newRentalDrvSel.value=""; });
       newRentalDrvSel.addEventListener("change", ()=>{ if(newRentalDrvSel.value) newDrvSel.value=""; });
     }
-    bindCustomerPicker();
+    bindCustomerPicker("f-customer-search", "f-customer", "f-customer-results", "Unassigned");
+    bindCustomerPicker("f-customerlink-search", "f-customer-link", "f-customerlink-results", "\u2014");
   }
 }
 
-function bindCustomerPicker(){
-  const search = el("f-customer-search");
-  const hidden = el("f-customer");
-  const results = el("f-customer-results");
+function bindCustomerPicker(searchId, hiddenId, resultsId, emptyLabel){
+  const search = el(searchId);
+  const hidden = el(hiddenId);
+  const results = el(resultsId);
   if(!search || !hidden || !results) return;
   function showResults(q){
     const term = q.trim().toLowerCase();
     const matches = !term ? state.customers.slice(0,30) :
       state.customers.filter(c=>(c.name||"").toLowerCase().indexOf(term)>-1 || (c.company||"").toLowerCase().indexOf(term)>-1).slice(0,30);
-    let html = `<button type="button" data-pick="" data-name="">Unassigned</button>`;
+    let html = `<button type="button" data-pick="" data-name="">${esc(emptyLabel||"Unassigned")}</button>`;
     html += matches.map(c=>`<button type="button" data-pick="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</button>`).join("");
     if(term && !matches.length) html += `<span class="faint" style="display:block; padding:10px 12px;">No match</span>`;
     results.innerHTML = html;
