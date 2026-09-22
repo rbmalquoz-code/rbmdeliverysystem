@@ -154,7 +154,7 @@ const NEXT_LABEL = { ordered:"Start getting ready", getting_ready:"Mark in trans
 let profile = null;
 let state = { customers: [], drivers: [], invoices: [], users: [], sites: [] };
 let unsubs = [];
-let ui = { view: null, modal: null, draftPending: null, loginError: "" };
+let ui = { view: null, modal: null, draftPending: null, loginError: "", overviewSearch: "", invoicesSearch: "" };
 
 function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function el(id){ return document.getElementById(id); }
@@ -176,6 +176,16 @@ function mapUrlFor(site){
 function pendingOf(inv){ return (inv.pendingItems||[]).filter(p=>!p.fulfilled); }
 function waLink(phone, text){ const digits=String(phone||"").replace(/[^0-9]/g,""); return "https://wa.me/"+digits+"?text="+encodeURIComponent(text); }
 function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
+function matchesSearch(inv, term){
+  if(!term) return true;
+  const t = term.toLowerCase();
+  const cust = customerById(inv.customerId);
+  const hay = [inv.invoiceNumber, inv.doNumber, cust?cust.name:"", cust?cust.company:""].join(" ").toLowerCase();
+  return hay.indexOf(t) > -1;
+}
+function searchBox(id, value, placeholder){
+  return `<input id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}" style="max-width:280px;">`;
+}
 function histLine(text){ return { at:Date.now(), byName:profile.name, byRole:profile.role, text }; }
 function withHist(inv, text){ const h=(inv.history||[]).slice(-39); h.push(histLine(text)); return h; }
 function buildStatusMessage(inv){
@@ -367,9 +377,14 @@ function viewOverview(){
   const pendingCount = invs.reduce((n,i)=>n+pendingOf(i).length,0);
   const inTransit = invs.filter(i=>i.status==="in_transit").length;
   const delivered = invs.filter(i=>i.status==="delivered").length;
+  const filtered = invs.filter(i=>matchesSearch(i, ui.overviewSearch)).sort(byCreatedDesc);
+  const shown = ui.overviewSearch ? filtered : filtered.slice(0,8);
   return pageHead("Overview","Today across every order") +
     `<div class="stats">${stat(invs.length,"Total invoices")}${stat(inTransit,"In transit")}${stat(delivered,"Delivered")}${stat(pendingCount,"Pending items")}</div>
-    <div class="card"><h3 style="margin-bottom:14px;">Recent invoices</h3>${invoicesTable(invs.slice().sort(byCreatedDesc).slice(0,8))}</div>`;
+    <div class="card"><div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+      <h3>${ui.overviewSearch?"Search results":"Recent invoices"}</h3>
+      ${searchBox("overview-search", ui.overviewSearch, "Search invoice #, DO #, or customer")}
+    </div>${invoicesTable(shown)}</div>`;
 }
 
 function invoicesTable(list){
@@ -391,12 +406,14 @@ function invoicesTable(list){
 
 function viewInvoicesAdmin(){
   const isCounter = profile.role==="counter";
+  const filtered = state.invoices.filter(i=>matchesSearch(i, ui.invoicesSearch)).sort(byCreatedDesc);
   return pageHead("Invoices", isCounter?"Create an invoice from the physical copy, or correct an existing one":"Warehouse or counter creates these \u2014 you can correct or remove a mistaken entry", isCounter?`<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`:"") +
-    `<div class="card">${invoicesTable(state.invoices.slice().sort(byCreatedDesc))}</div>`;
+    `<div class="card"><div style="margin-bottom:14px;">${searchBox("invoices-search", ui.invoicesSearch, "Search invoice #, DO #, or customer")}</div>${invoicesTable(filtered)}</div>`;
 }
 function viewQueueWarehouse(){
+  const filtered = state.invoices.filter(i=>matchesSearch(i, ui.invoicesSearch)).sort(byCreatedDesc);
   return pageHead("Invoices","Create an invoice from the physical copy, then track pending items", `<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`) +
-    `<div class="card">${invoicesTable(state.invoices.slice().sort(byCreatedDesc))}</div>`;
+    `<div class="card"><div style="margin-bottom:14px;">${searchBox("invoices-search", ui.invoicesSearch, "Search invoice #, DO #, or customer")}</div>${invoicesTable(filtered)}</div>`;
 }
 function viewPendingOrders(){
   const list = state.invoices.filter(i=>i.status!=="delivered").sort(byCreatedDesc);
@@ -487,7 +504,7 @@ function viewUsers(){
 function viewMyDeliveries(){
   const mine = state.invoices.filter(i=>i.status!=="delivered").sort(byCreatedDesc);
   if(!mine.length) return pageHead("My deliveries","Nothing assigned right now") + `<div class="empty">No active deliveries assigned to you.</div>`;
-  return pageHead("My deliveries","Mark in transit once you're on your way") + mine.map(inv=>{
+  return pageHead("My deliveries","Mark in transit once you're on your way, then delivered once it's dropped off") + mine.map(inv=>{
     const cust = customerById(inv.customerId);
     const pend = pendingOf(inv).length;
     const canGo = inv.status==="ordered" || inv.status==="getting_ready";
@@ -505,7 +522,9 @@ function viewMyDeliveries(){
         ${mapUrlFor(site)?`<br><a class="btn btn-sm" style="margin-top:6px;" href="${esc(mapUrlFor(site))}" target="_blank" rel="noopener">Open map</a>`:""}
       </div>`; })()}
       <p style="margin-top:10px;">${inv.totalItems||0} items total${pend?`, ${pend} pending`:""}</p>
-      ${canGo ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;" data-act="driver-in-transit" data-inv="${inv.id}">Mark in transit</button>` : `<p class="faint" style="margin-top:12px;">Already on the way or delivered.</p>`}
+      ${inv.status==="in_transit" ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;" data-act="driver-delivered" data-inv="${inv.id}">Mark delivered</button>`
+        : canGo ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;" data-act="driver-in-transit" data-inv="${inv.id}">Mark in transit</button>`
+        : `<p class="faint" style="margin-top:12px;">Delivered.</p>`}
     </div>`;
   }).join("");
 }
@@ -705,12 +724,26 @@ function invoiceDetail(id){
 
 /* ---------------- events ---------------- */
 
+function bindSearchInput(id, onChange){
+  const node = el(id);
+  if(!node) return;
+  node.addEventListener("input", ()=>{
+    const pos = node.selectionStart;
+    onChange(node.value);
+    render();
+    const again = el(id);
+    if(again){ again.focus(); again.setSelectionRange(pos,pos); }
+  });
+}
+
 function bindShell(){
   document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click", ()=>{ ui.view=b.getAttribute("data-nav"); ui.modal=null; render(); }));
   const out = document.querySelector('[data-act="signout"]');
   if(out) out.addEventListener("click", ()=>signOut(auth));
   const main = el("main");
   main.addEventListener("click", mainClickHandler);
+  bindSearchInput("overview-search", v=>{ ui.overviewSearch = v; });
+  bindSearchInput("invoices-search", v=>{ ui.invoicesSearch = v; });
   const modalBg = document.querySelector(".modal-bg");
   if(modalBg){
     modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
@@ -753,6 +786,7 @@ function mainClickHandler(e){
   else if(act==="del-driver"){ if(confirm("Remove this driver?")) deleteDoc(doc(db,"drivers",b.getAttribute("data-id"))); }
   else if(act==="fulfill-item"){ fulfillItem(b.getAttribute("data-inv"), b.getAttribute("data-item")); }
   else if(act==="driver-in-transit"){ driverMarkInTransit(b.getAttribute("data-inv")); }
+  else if(act==="driver-delivered"){ driverMarkDelivered(b.getAttribute("data-inv")); }
 }
 
 async function modalClickHandler(e){
@@ -909,6 +943,14 @@ async function driverMarkInTransit(invId){
   const hist = withHist(inv, "Marked in transit by driver");
   await updateDoc(doc(db,"invoices",invId), { status:"in_transit", updatedAt:Date.now(), history:hist });
   showToast("Marked in transit");
+}
+
+async function driverMarkDelivered(invId){
+  const inv = state.invoices.find(i=>i.id===invId);
+  if(!inv) return;
+  const hist = withHist(inv, "Marked delivered by driver");
+  await updateDoc(doc(db,"invoices",invId), { status:"delivered", updatedAt:Date.now(), history:hist });
+  showToast("Marked delivered");
 }
 
 render();
