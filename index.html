@@ -98,8 +98,8 @@ tr:last-child td{border-bottom:none;}
 .err{color:var(--rust); font-size:12.5px; margin-top:8px;}
 .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:999px; font-size:13px; font-weight:500; z-index:80; opacity:0; pointer-events:none; transition:opacity .2s;}
 .toast.show{opacity:1;}
-.kanban{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
-.kcol{background:var(--surface-2); border-radius:12px; padding:12px;}
+.kanban{display:grid; grid-template-columns:repeat(4,1fr); gap:14px;}
+.kcol{background:var(--surface-2); border-radius:12px; padding:12px; max-height:70vh; overflow-y:auto;}
 .kcol h4{font-size:12.5px; text-transform:uppercase; letter-spacing:0.03em; color:var(--ink-muted); margin-bottom:10px; display:flex; justify-content:space-between;}
 .kcard{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:11px 12px; margin-bottom:8px; cursor:pointer; font-size:13px;}
 .kcard:hover{border-color:var(--steel);}
@@ -108,7 +108,8 @@ tr:last-child td{border-bottom:none;}
 .hist-row{font-size:12.5px; padding:5px 0; color:var(--ink-muted); border-bottom:1px dashed var(--line);}
 .hist-row:last-child{border-bottom:none;}
 .hist-row b{color:var(--ink); font-weight:600;}
-@media (max-width:900px){ .kanban{grid-template-columns:1fr;} }
+@media (max-width:900px){ .kanban{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:600px){ .kanban{grid-template-columns:1fr;} }
 @media (max-width:760px){
   #app{flex-direction:column;}
   .sidebar{position:relative; width:100%; height:auto; flex-direction:row; align-items:center; overflow-x:auto;}
@@ -154,7 +155,13 @@ const NEXT_LABEL = { ordered:"Start getting ready", getting_ready:"Mark in trans
 let profile = null;
 let state = { customers: [], drivers: [], invoices: [], users: [], sites: [] };
 let unsubs = [];
-let ui = { view: null, modal: null, draftPending: null, loginError: "", overviewSearch: "", invoicesSearch: "" };
+let ui = { view: null, modal: null, draftPending: null, loginError: "",
+  overviewSearch: "", overviewStatus: "",
+  invoicesSearch: "", invoicesStatus: "",
+  pendingOrdersStatus: "",
+  pendingItemsCustomer: "",
+  sitesCustomer: "",
+  customersSearch: "", driversSearch: "", usersSearch: "" };
 
 function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function el(id){ return document.getElementById(id); }
@@ -185,6 +192,16 @@ function matchesSearch(inv, term){
 }
 function searchBox(id, value, placeholder){
   return `<input id="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}" style="max-width:280px;">`;
+}
+function statusFilterHtml(id, value){
+  return `<select id="${id}" style="max-width:170px;"><option value="">All statuses</option>${STATUS_ORDER.map(s=>`<option value="${s}" ${value===s?"selected":""}>${STATUS_LABEL[s]}</option>`).join("")}</select>`;
+}
+function customerFilterHtml(id, value){
+  return `<select id="${id}" style="max-width:220px;"><option value="">All customers</option>${state.customers.map(c=>`<option value="${c.id}" ${value===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>`;
+}
+function textMatch(fields, term){
+  if(!term) return true;
+  return fields.join(" ").toLowerCase().indexOf(term.toLowerCase()) > -1;
 }
 function histLine(text){ return { at:Date.now(), byName:profile.name, byRole:profile.role, text }; }
 function withHist(inv, text){ const h=(inv.history||[]).slice(-39); h.push(histLine(text)); return h; }
@@ -352,10 +369,11 @@ function stat(n,l){ return `<div class="stat"><div class="n">${n}</div><div clas
 /* ---------------- admin: live dashboard ---------------- */
 
 function viewLive(){
-  const cols = ["ordered","getting_ready","in_transit"];
+  const cols = ["ordered","getting_ready","in_transit","delivered"];
   const html = cols.map(st=>{
-    const list = state.invoices.filter(i=>i.status===st).sort(byCreatedDesc);
-    return `<div class="kcol"><h4>${STATUS_LABEL[st]} <span>${list.length}</span></h4>` +
+    const full = state.invoices.filter(i=>i.status===st).sort(byCreatedDesc);
+    const list = st==="delivered" ? full.slice(0,25) : full;
+    return `<div class="kcol"><h4>${STATUS_LABEL[st]} <span>${full.length}</span></h4>` +
       (list.length ? list.map(inv=>{
         const cust = customerById(inv.customerId);
         const pend = pendingOf(inv).length;
@@ -365,6 +383,7 @@ function viewLive(){
           ${pend?`<span class="pill pill-rust" style="margin-top:4px;">${pend} pending</span>`:""}
         </div>`;
       }).join("") : `<p class="faint" style="font-size:12.5px;">Nothing here.</p>`) +
+      (st==="delivered" && full.length>25 ? `<p class="faint" style="font-size:12px;">+${full.length-25} more \u2014 see Overview</p>` : "") +
       `</div>`;
   }).join("");
   return pageHead("Live dashboard","Everything currently moving through the pipeline, in real time") + `<div class="kanban">${html}</div>`;
@@ -377,13 +396,14 @@ function viewOverview(){
   const pendingCount = invs.reduce((n,i)=>n+pendingOf(i).length,0);
   const inTransit = invs.filter(i=>i.status==="in_transit").length;
   const delivered = invs.filter(i=>i.status==="delivered").length;
-  const filtered = invs.filter(i=>matchesSearch(i, ui.overviewSearch)).sort(byCreatedDesc);
-  const shown = ui.overviewSearch ? filtered : filtered.slice(0,8);
+  const filtered = invs.filter(i=>matchesSearch(i, ui.overviewSearch) && (!ui.overviewStatus || i.status===ui.overviewStatus)).sort(byCreatedDesc);
+  const isFiltering = ui.overviewSearch || ui.overviewStatus;
+  const shown = isFiltering ? filtered : filtered.slice(0,8);
   return pageHead("Overview","Today across every order") +
     `<div class="stats">${stat(invs.length,"Total invoices")}${stat(inTransit,"In transit")}${stat(delivered,"Delivered")}${stat(pendingCount,"Pending items")}</div>
     <div class="card"><div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
-      <h3>${ui.overviewSearch?"Search results":"Recent invoices"}</h3>
-      ${searchBox("overview-search", ui.overviewSearch, "Search invoice #, DO #, or customer")}
+      <h3>${isFiltering?"Search results":"Recent invoices"}</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">${searchBox("overview-search", ui.overviewSearch, "Search invoice #, DO #, or customer")}${statusFilterHtml("overview-status", ui.overviewStatus)}</div>
     </div>${invoicesTable(shown)}</div>`;
 }
 
@@ -406,58 +426,62 @@ function invoicesTable(list){
 
 function viewInvoicesAdmin(){
   const isCounter = profile.role==="counter";
-  const filtered = state.invoices.filter(i=>matchesSearch(i, ui.invoicesSearch)).sort(byCreatedDesc);
+  const filtered = state.invoices.filter(i=>matchesSearch(i, ui.invoicesSearch) && (!ui.invoicesStatus || i.status===ui.invoicesStatus)).sort(byCreatedDesc);
   return pageHead("Invoices", isCounter?"Create an invoice from the physical copy, or correct an existing one":"Warehouse or counter creates these \u2014 you can correct or remove a mistaken entry", isCounter?`<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`:"") +
-    `<div class="card"><div style="margin-bottom:14px;">${searchBox("invoices-search", ui.invoicesSearch, "Search invoice #, DO #, or customer")}</div>${invoicesTable(filtered)}</div>`;
+    `<div class="card"><div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">${searchBox("invoices-search", ui.invoicesSearch, "Search invoice #, DO #, or customer")}${statusFilterHtml("invoices-status", ui.invoicesStatus)}</div>${invoicesTable(filtered)}</div>`;
 }
 function viewQueueWarehouse(){
-  const filtered = state.invoices.filter(i=>matchesSearch(i, ui.invoicesSearch)).sort(byCreatedDesc);
+  const filtered = state.invoices.filter(i=>matchesSearch(i, ui.invoicesSearch) && (!ui.invoicesStatus || i.status===ui.invoicesStatus)).sort(byCreatedDesc);
   return pageHead("Invoices","Create an invoice from the physical copy, then track pending items", `<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`) +
-    `<div class="card"><div style="margin-bottom:14px;">${searchBox("invoices-search", ui.invoicesSearch, "Search invoice #, DO #, or customer")}</div>${invoicesTable(filtered)}</div>`;
+    `<div class="card"><div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">${searchBox("invoices-search", ui.invoicesSearch, "Search invoice #, DO #, or customer")}${statusFilterHtml("invoices-status", ui.invoicesStatus)}</div>${invoicesTable(filtered)}</div>`;
 }
 function viewPendingOrders(){
-  const list = state.invoices.filter(i=>i.status!=="delivered").sort(byCreatedDesc);
+  const inScope = ["ordered","getting_ready","in_transit"];
+  const status = inScope.includes(ui.pendingOrdersStatus) ? ui.pendingOrdersStatus : "";
+  const list = state.invoices.filter(i=>i.status!=="delivered" && (!status || i.status===status)).sort(byCreatedDesc);
+  const filterOptions = `<option value="">All (not yet delivered)</option>` + inScope.map(s=>`<option value="${s}" ${status===s?"selected":""}>${STATUS_LABEL[s]}</option>`).join("");
   return pageHead("Pending orders","Orders still moving through the pipeline \u2014 not yet delivered") +
-    `<div class="card">${invoicesTable(list)}</div>`;
+    `<div class="card"><div style="margin-bottom:14px;"><select id="pendingorders-status" style="max-width:220px;">${filterOptions}</select></div>${invoicesTable(list)}</div>`;
 }
 
 /* ---------------- pending items ---------------- */
 
 function viewPending(){
-  const rows=[];
+  let rows=[];
   state.invoices.forEach(inv=>{ pendingOf(inv).forEach(p=>rows.push({inv,item:p})); });
+  if(ui.pendingItemsCustomer) rows = rows.filter(r=>r.inv.customerId===ui.pendingItemsCustomer);
   const body = !rows.length ? `<div class="empty">No pending items right now.</div>` :
     `<table><thead><tr><th>Item no.</th><th>Note</th><th>Invoice</th><th>DO No.</th><th>Customer</th><th></th></tr></thead><tbody>` +
     rows.map(r=>{
       const cust = customerById(r.inv.customerId);
       return `<tr><td><b>${esc(r.item.itemNumber)}</b></td><td class="faint">${esc(r.item.note||"\u2014")}</td>
         <td>${esc(r.inv.invoiceNumber)}</td><td>${esc(r.inv.doNumber||"\u2014")}</td><td>${esc(cust?cust.name:"\u2014")}</td>
-        <td style="text-align:right;"><button class="btn btn-sm" data-act="fulfill-item" data-inv="${r.inv.id}" data-item="${r.item.id}">Tick off</button></td></tr>`;
+        <td style="text-align:right;"><button class="btn btn-sm" data-act="open-followup" data-inv="${r.inv.id}" data-item="${r.item.id}">Tick off &amp; create delivery</button></td></tr>`;
     }).join("") + `</tbody></table>`;
-  return pageHead("Pending items","Item numbers marked not-available on the physical invoice \u2014 tick off once restocked and sent") + `<div class="card">${body}</div>`;
+  return pageHead("Pending items","Item numbers marked not-available on the physical invoice \u2014 tick off to send them out on their own delivery", customerFilterHtml("pending-customer-filter", ui.pendingItemsCustomer)) + `<div class="card">${body}</div>`;
 }
 
 /* ---------------- customers / drivers (admin) ---------------- */
 
 function viewCustomers(){
   const isAdmin = profile.role==="admin";
-  const list = state.customers;
-  const body = !list.length ? `<div class="empty">No customers yet.</div>` :
+  const list = state.customers.filter(c=>textMatch([c.name,c.company,c.phone,c.address], ui.customersSearch));
+  const body = !list.length ? `<div class="empty">No customers match.</div>` :
     `<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
     list.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
       <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-customer" data-id="${c.id}">Edit</button>
       ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
-  return pageHead("Customers","People and companies you deliver to", `<button class="btn btn-primary" data-act="new-customer">Add customer</button>`) + `<div class="card">${body}</div>`;
+  return pageHead("Customers","People and companies you deliver to", `<div style="display:flex; gap:8px; flex-wrap:wrap;">${searchBox("customers-search", ui.customersSearch, "Search name, company or phone")}<button class="btn btn-primary" data-act="new-customer">Add customer</button></div>`) + `<div class="card">${body}</div>`;
 }
 function viewDrivers(){
   const isAdmin = profile.role==="admin";
-  const list = state.drivers;
-  const body = !list.length ? `<div class="empty">No drivers yet.</div>` :
+  const list = state.drivers.filter(d=>textMatch([d.name,d.phone,d.vehicle], ui.driversSearch));
+  const body = !list.length ? `<div class="empty">No drivers match.</div>` :
     `<table><thead><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th></th></tr></thead><tbody>` +
     list.map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.phone||"\u2014")}</td><td class="faint">${esc(d.vehicle||"\u2014")}</td>
       <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-driver" data-id="${d.id}">Edit</button>
       ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-driver" data-id="${d.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
-  return pageHead("Truck drivers","Drivers you can assign to a delivery, and link to a driver login", `<button class="btn btn-primary" data-act="new-driver">Add driver</button>`) + `<div class="card">${body}</div>`;
+  return pageHead("Truck drivers","Drivers you can assign to a delivery, and link to a driver login", `<div style="display:flex; gap:8px; flex-wrap:wrap;">${searchBox("drivers-search", ui.driversSearch, "Search name, phone or vehicle")}<button class="btn btn-primary" data-act="new-driver">Add driver</button></div>`) + `<div class="card">${body}</div>`;
 }
 
 /* ---------------- sites (visible to every role) ---------------- */
@@ -465,10 +489,13 @@ function viewDrivers(){
 function viewSites(){
   const canEdit = profile.role==="admin" || profile.role==="counter" || profile.role==="warehouse";
   const canDelete = profile.role==="admin";
-  const list = state.sites.slice().sort((a,b)=>(a.siteName||"").localeCompare(b.siteName||""));
-  if(!list.length) return pageHead("Site locations","Delivery sites with their location and on-site contact", canEdit ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
-    `<div class="empty">No sites saved yet.</div>`;
   const showCustomerCol = profile.role!=="customer";
+  let list = state.sites.slice().sort((a,b)=>(a.siteName||"").localeCompare(b.siteName||""));
+  if(showCustomerCol && ui.sitesCustomer) list = list.filter(s=>s.customerId===ui.sitesCustomer);
+  const filterHtml = showCustomerCol ? customerFilterHtml("sites-customer-filter", ui.sitesCustomer) : "";
+  const actionHtml = `${filterHtml}${canEdit ? `<button class="btn btn-primary" data-act="new-site" style="margin-left:8px;">Add site</button>` : ""}`;
+  if(!list.length) return pageHead("Site locations","Delivery sites with their location and on-site contact", actionHtml) +
+    `<div class="empty">No sites saved yet.</div>`;
   const body = `<table><thead><tr>${showCustomerCol?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${(canEdit||canDelete)?"<th></th>":""}</tr></thead><tbody>` +
     list.map(s=>{
       const cust = customerById(s.customerId);
@@ -481,20 +508,20 @@ function viewSites(){
         ${(canEdit||canDelete)?`<td style="text-align:right; white-space:nowrap;">${canEdit?`<button class="btn btn-sm" data-act="edit-site" data-id="${s.id}">Edit</button>`:""} ${canDelete?`<button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button>`:""}</td>`:""}
       </tr>`;
     }).join("") + `</tbody></table>`;
-  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", canEdit ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
+  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", actionHtml) +
     `<div class="card">${body}</div>`;
 }
 
 /* ---------------- users & roles (admin) ---------------- */
 
 function viewUsers(){
-  const list = state.users;
-  const body = !list.length ? `<div class="empty">No accounts yet besides your own.</div>` :
+  const list = state.users.filter(u=>textMatch([u.name,u.email,u.role], ui.usersSearch));
+  const body = !list.length ? `<div class="empty">No accounts match.</div>` :
     `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody>` +
     list.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.email||"\u2014")}</td><td><span class="pill pill-muted">${esc(u.role)}</span></td>
       <td style="text-align:right;"><button class="btn btn-sm" data-act="edit-user" data-id="${u.id}">Edit</button></td></tr>`).join("") +
     `</tbody></table>`;
-  return pageHead("Users & roles","Create a login for a warehouse teammate, driver or customer", `<button class="btn btn-primary" data-act="new-user">Add user</button>`) +
+  return pageHead("Users & roles","Create a login for a warehouse teammate, driver or customer", `<div style="display:flex; gap:8px; flex-wrap:wrap;">${searchBox("users-search", ui.usersSearch, "Search name, email or role")}<button class="btn btn-primary" data-act="new-user">Add user</button></div>`) +
     `<div class="card">${body}</div>
     <p class="faint" style="margin-top:12px;">Editing here changes name/role only. Email and password are managed in the Firebase console.</p>`;
 }
@@ -570,6 +597,7 @@ function renderModal(){
   if(m.type==="new-site") inner = siteForm(null);
   if(m.type==="edit-site") inner = siteForm(siteById(m.id));
   if(m.type==="open-invoice") inner = invoiceDetail(m.id);
+  if(m.type==="followup") inner = followupForm(m.invId, m.itemId);
   return `<div class="modal-bg" data-act="close-modal-bg"><div class="modal">${inner}</div></div>`;
 }
 
@@ -646,6 +674,26 @@ function siteForm(s){
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-site" data-id="${s?s.id:""}">${s?"Save changes":"Add site"}</button></div>`;
 }
 
+
+function followupForm(invId, itemId){
+  const inv = state.invoices.find(i=>i.id===invId);
+  if(!inv) return `<p>Not found.</p><div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
+  const item = (inv.pendingItems||[]).find(p=>p.id===itemId);
+  if(!item) return `<p>Not found.</p><div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
+  const cust = customerById(inv.customerId);
+  const site = inv.siteId ? siteById(inv.siteId) : null;
+  if(!state.drivers.length){
+    return `<h2>Create delivery</h2><p class="muted">No drivers on file yet \u2014 add one first, then come back to tick this item off.</p>
+      <div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
+  }
+  const driverOptions = state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
+  return `<h2>Create delivery for item ${esc(item.itemNumber)}</h2>
+    <p class="faint" style="margin-bottom:16px;">Restocked from ${esc(inv.invoiceNumber)} \u2014 ${esc(cust?cust.name:"\u2014")}${site?" \u00b7 "+esc(site.siteName):""}${item.note?" \u2014 "+esc(item.note):""}</p>
+    <div class="field"><label>New invoice number</label><input id="f-fu-invnum" placeholder="e.g. INV-4030"></div>
+    <div class="field"><label>New DO number</label><input id="f-fu-donum" placeholder="e.g. DO-1195"></div>
+    <div class="field"><label>Driver</label><select id="f-fu-driver"><option value="">Select a driver</option>${driverOptions}</select></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-followup" data-inv="${invId}" data-item="${itemId}">Create delivery</button></div>`;
+}
 
 function invoiceDetail(id){
   const inv = state.invoices.find(i=>i.id===id);
@@ -736,6 +784,12 @@ function bindSearchInput(id, onChange){
   });
 }
 
+function bindFilterSelect(id, onChange){
+  const node = el(id);
+  if(!node) return;
+  node.addEventListener("change", ()=>{ onChange(node.value); render(); });
+}
+
 function bindShell(){
   document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click", ()=>{ ui.view=b.getAttribute("data-nav"); ui.modal=null; render(); }));
   const out = document.querySelector('[data-act="signout"]');
@@ -744,6 +798,14 @@ function bindShell(){
   main.addEventListener("click", mainClickHandler);
   bindSearchInput("overview-search", v=>{ ui.overviewSearch = v; });
   bindSearchInput("invoices-search", v=>{ ui.invoicesSearch = v; });
+  bindSearchInput("customers-search", v=>{ ui.customersSearch = v; });
+  bindSearchInput("drivers-search", v=>{ ui.driversSearch = v; });
+  bindSearchInput("users-search", v=>{ ui.usersSearch = v; });
+  bindFilterSelect("overview-status", v=>{ ui.overviewStatus = v; });
+  bindFilterSelect("invoices-status", v=>{ ui.invoicesStatus = v; });
+  bindFilterSelect("pendingorders-status", v=>{ ui.pendingOrdersStatus = v; });
+  bindFilterSelect("pending-customer-filter", v=>{ ui.pendingItemsCustomer = v; });
+  bindFilterSelect("sites-customer-filter", v=>{ ui.sitesCustomer = v; });
   const modalBg = document.querySelector(".modal-bg");
   if(modalBg){
     modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
@@ -784,7 +846,7 @@ function mainClickHandler(e){
   else if(act==="del-site"){ if(confirm("Remove this site?")) deleteDoc(doc(db,"sites",b.getAttribute("data-id"))); }
   else if(act==="del-customer"){ if(confirm("Remove this customer?")) deleteDoc(doc(db,"customers",b.getAttribute("data-id"))); }
   else if(act==="del-driver"){ if(confirm("Remove this driver?")) deleteDoc(doc(db,"drivers",b.getAttribute("data-id"))); }
-  else if(act==="fulfill-item"){ fulfillItem(b.getAttribute("data-inv"), b.getAttribute("data-item")); }
+  else if(act==="open-followup"){ ui.modal={type:"followup", invId:b.getAttribute("data-inv"), itemId:b.getAttribute("data-item")}; render(); }
   else if(act==="driver-in-transit"){ driverMarkInTransit(b.getAttribute("data-inv")); }
   else if(act==="driver-delivered"){ driverMarkDelivered(b.getAttribute("data-inv")); }
 }
@@ -909,6 +971,15 @@ async function modalClickHandler(e){
       await deleteDoc(doc(db,"invoices",b.getAttribute("data-inv")));
       ui.modal=null; render(); showToast("Invoice deleted");
     }
+  } else if(act==="save-followup"){
+    const invId = b.getAttribute("data-inv");
+    const itemId = b.getAttribute("data-item");
+    const newNum = el("f-fu-invnum").value.trim();
+    const newDo = el("f-fu-donum").value.trim();
+    const driverId = el("f-fu-driver").value;
+    if(!newNum || !driverId){ showToast("Enter an invoice number and pick a driver"); return; }
+    await createFollowUpDelivery(invId, itemId, newNum, newDo, driverId);
+    ui.modal=null; render(); showToast("Delivery created");
   } else if(act==="copy-message"){
     const inv3 = state.invoices.find(i=>i.id===b.getAttribute("data-inv"));
     const msg = buildStatusMessage(inv3);
@@ -927,14 +998,24 @@ function syncPendingFromInputs(){
   });
 }
 
-async function fulfillItem(invId, itemId){
+async function createFollowUpDelivery(invId, itemId, newInvoiceNumber, newDoNumber, driverId){
   const inv = state.invoices.find(i=>i.id===invId);
   if(!inv) return;
   const target = (inv.pendingItems||[]).find(p=>p.id===itemId);
+  if(!target) return;
+  const cust = customerById(inv.customerId);
+  const newInv = {
+    invoiceNumber: newInvoiceNumber, doNumber: newDoNumber||"", customerId: inv.customerId, siteId: inv.siteId||null,
+    totalItems: 1, pendingItems: [], status: "ordered", driverId: driverId,
+    notes: "Follow-up delivery for "+inv.invoiceNumber+" \u2014 item "+target.itemNumber+(target.note?": "+target.note:""),
+    createdAt: Date.now(), createdByUid: profile.uid, createdByName: profile.name, createdByRole: profile.role
+  };
+  newInv.history = [histLine("Created as follow-up for "+inv.invoiceNumber+", item "+target.itemNumber)];
+  await addDoc(collection(db,"invoices"), newInv);
+
   const items = (inv.pendingItems||[]).map(p=> p.id===itemId ? {...p, fulfilled:true, fulfilledAt:Date.now()} : p);
-  const hist = withHist(inv, "Marked item "+(target?target.itemNumber:"")+" available");
+  const hist = withHist(inv, "Item "+target.itemNumber+" ticked off \u2014 new delivery "+newInvoiceNumber+" created");
   await updateDoc(doc(db,"invoices",invId), { pendingItems:items, updatedAt:Date.now(), history:hist });
-  showToast("Ticked off");
 }
 
 async function driverMarkInTransit(invId){
