@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reality BM &middot; Delivery Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF0E8; --surface:#FFFFFF; --surface-2:#E4E7DC; --line:#D5D9CC;
+  --ink:#1C2321; --ink-muted:#5B655F; --ink-faint:#8B948A;
+  --steel:#2B4C6F; --steel-ink:#0F2A42; --steel-bg:#DCE6EF;
+  --amber:#C98A1A; --amber-ink:#5A3B08; --amber-bg:#F6E3BE;
+  --green:#3F7D4E; --green-ink:#1C3F26; --green-bg:#DDEDE0;
+  --rust:#B54A2C; --rust-ink:#5C2313; --rust-bg:#F5DDD3;
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#181C19; --surface:#20241F; --surface-2:#262B24; --line:#343A33;
+    --ink:#EDEFE9; --ink-muted:#A9B0A4; --ink-faint:#727A6E;
+    --steel-bg:#1E2E3E; --steel:#7CA6CC; --steel-ink:#CFE1F2;
+    --amber-bg:#3B2E12; --amber:#E0A93D; --amber-ink:#F3D69B;
+    --green-bg:#1D3323; --green:#6BB37D; --green-ink:#B9E0C3;
+    --rust-bg:#3B2019; --rust:#DE8465; --rust-ink:#F2C3B0;
+  }
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{margin:0; background:var(--bg); color:var(--ink);}
+h1,h2,h3,h4{font-family:"Space Grotesk",sans-serif; font-weight:600; margin:0 0 4px;}
+p{margin:0;}
+button,input,select,textarea{font-family:inherit; font-size:14px; color:var(--ink);}
+input,select,textarea{background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:9px 11px; width:100%;}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--steel); outline-offset:1px;}
+label{display:block; font-size:12px; color:var(--ink-muted); margin:0 0 4px; font-weight:500;}
+.field{margin-bottom:12px;}
+button{cursor:pointer;}
+.btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:9px 14px; font-weight:600; font-size:13px; color:var(--ink);}
+.btn:hover{border-color:var(--ink-faint);}
+.btn-primary{background:var(--steel); border-color:var(--steel); color:#fff;}
+.btn-primary:hover{opacity:0.92;}
+.btn-ghost{border-color:transparent; background:transparent;}
+.btn-ghost:hover{background:var(--surface-2);}
+.btn-danger{color:var(--rust); border-color:var(--rust-bg);}
+.btn-sm{padding:6px 10px; font-size:12px;}
+.pill{display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600;}
+.pill-steel{background:var(--steel-bg); color:var(--steel-ink);}
+.pill-amber{background:var(--amber-bg); color:var(--amber-ink);}
+.pill-green{background:var(--green-bg); color:var(--green-ink);}
+.pill-rust{background:var(--rust-bg); color:var(--rust-ink);}
+.pill-muted{background:var(--surface-2); color:var(--ink-muted);}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px;}
+#app{min-height:100vh; display:flex;}
+.sidebar{width:220px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--line); padding:20px 14px; display:flex; flex-direction:column; gap:18px; position:sticky; top:0; height:100vh; overflow-y:auto;}
+.brand .mark{width:34px; height:34px; border-radius:8px; background:var(--steel); color:#fff; display:flex; align-items:center; justify-content:center; font-family:"Space Grotesk"; font-weight:700; font-size:15px; margin-bottom:8px;}
+.brand h1{font-size:15px; line-height:1.3;}
+.brand p{font-size:12px; color:var(--ink-muted);}
+.nav{display:flex; flex-direction:column; gap:2px;}
+.nav button{text-align:left; background:transparent; border:none; border-radius:8px; padding:9px 10px; font-size:13.5px; font-weight:500; color:var(--ink-muted);}
+.nav button.active{background:var(--steel-bg); color:var(--steel-ink); font-weight:600;}
+.nav button:hover:not(.active){background:var(--surface-2); color:var(--ink);}
+.session{margin-top:auto; border-top:1px solid var(--line); padding-top:14px;}
+.session .who{font-size:13px; font-weight:600;}
+.session .role{font-size:12px; color:var(--ink-muted); margin-bottom:10px;}
+main{flex:1; min-width:0; padding:28px 32px 60px; max-width:1100px;}
+.pagehead{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:20px; gap:12px; flex-wrap:wrap;}
+.pagehead p{color:var(--ink-muted); font-size:13.5px; margin-top:2px;}
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:24px;}
+.stat{background:var(--surface-2); border-radius:10px; padding:14px;}
+.stat .n{font-family:"Space Grotesk"; font-size:26px; font-weight:700;}
+.stat .l{font-size:12px; color:var(--ink-muted); margin-top:2px;}
+table{width:100%; border-collapse:collapse; font-size:13.5px;}
+th{text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; color:var(--ink-faint); font-weight:600; padding:0 10px 8px; border-bottom:1px solid var(--line);}
+td{padding:12px 10px; border-bottom:1px solid var(--line); vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+.row-click{cursor:pointer;}
+.row-click:hover{background:var(--surface-2);}
+.empty{color:var(--ink-faint); font-size:13.5px; padding:30px 10px; text-align:center; border:1px dashed var(--line); border-radius:10px;}
+.modal-bg{position:fixed; inset:0; background:rgba(20,24,20,0.45); display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto; z-index:50;}
+.modal{background:var(--surface); border-radius:14px; padding:24px; width:100%; max-width:560px; border:1px solid var(--line);}
+.modal h2{font-size:17px;}
+.modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:18px; flex-wrap:wrap;}
+.item-row{display:grid; grid-template-columns:110px 1fr 32px; gap:8px; align-items:center; margin-bottom:8px;}
+.itemhead{display:grid; grid-template-columns:110px 1fr 32px; gap:8px; font-size:11px; color:var(--ink-faint); margin-bottom:6px;}
+.login-wrap{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;}
+.login-box{max-width:380px; width:100%;}
+.itemline{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:13.5px;}
+.itemline:last-child{border-bottom:none;}
+.itemline .name{flex:1;}
+.muted{color:var(--ink-muted);}
+.faint{color:var(--ink-faint); font-size:12.5px;}
+.err{color:var(--rust); font-size:12.5px; margin-top:8px;}
+.toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:999px; font-size:13px; font-weight:500; z-index:80; opacity:0; pointer-events:none; transition:opacity .2s;}
+.toast.show{opacity:1;}
+@media (max-width:760px){
+  #app{flex-direction:column;}
+  .sidebar{position:relative; width:100%; height:auto; flex-direction:row; align-items:center; overflow-x:auto;}
+  .brand{display:none;}
+  .nav{flex-direction:row;}
+  .session{margin-top:0; border-top:none; padding-top:0; border-left:1px solid var(--line); padding-left:12px; margin-left:auto;}
+  main{padding:20px 16px 60px;}
+}
+</style>
+</head>
+<body>
+<div id="app"><div class="login-wrap"><p class="faint">Loading&hellip;</p></div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* ============================================================
+   1) PASTE YOUR FIREBASE CONFIG HERE (from Firebase Console >
+      Project settings > General > Your apps > SDK setup).
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyCr4ZfBTssAOHsHlkdbw_gOggaIV9hofLU",
+  authDomain: "rbmdeliverysystem.firebaseapp.com",
+  projectId: "rbmdeliverysystem",
+  storageBucket: "rbmdeliverysystem.firebasestorage.app",
+  messagingSenderId: "92695045485",
+  appId: "1:92695045485:web:31698eaa6e078a4fb76664"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const STATUS_LABEL = {
+  awaiting_dispatch: "Yet to be delivered",
+  in_transit: "In transit",
+  delivered: "Delivered"
+};
+const STATUS_PILL = {
+  awaiting_dispatch: "pill-amber",
+  in_transit: "pill-steel",
+  delivered: "pill-green"
+};
+
+let profile = null;      // { uid, name, role, customerId }
+let state = { customers: [], drivers: [], invoices: [], users: [] };
+let unsubs = [];
+let ui = { view: null, modal: null, draftPending: null, loginError: "" };
+
+function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
+function el(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function fmtDate(ts){ if(!ts) return ""; return new Date(ts).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
+function showToast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); }
+function customerById(id){ return state.customers.find(c=>c.id===id); }
+function driverById(id){ return state.drivers.find(d=>d.id===id); }
+function pendingOf(inv){ return (inv.pendingItems||[]).filter(p=>!p.fulfilled); }
+function waLink(phone, text){ const digits=String(phone||"").replace(/[^0-9]/g,""); return "https://wa.me/"+digits+"?text="+encodeURIComponent(text); }
+function buildStatusMessage(inv){
+  const cust = customerById(inv.customerId);
+  const driver = inv.driverId ? driverById(inv.driverId) : null;
+  const pend = pendingOf(inv);
+  const lines = [];
+  lines.push("Hi "+(cust?cust.name:"there")+", update on your order "+inv.invoiceNumber+(inv.doNumber?" (DO "+inv.doNumber+")":"")+" from Reality Building Materials:");
+  lines.push("Status: "+(STATUS_LABEL[inv.status]||inv.status));
+  if(inv.totalItems) lines.push("Items: "+inv.totalItems+" total"+(pend.length ? ", "+pend.length+" pending (will follow separately)" : ", all ready"));
+  if(driver) lines.push("Driver: "+driver.name+(driver.phone?" ("+driver.phone+")":""));
+  if(inv.notes) lines.push("Note: "+inv.notes);
+  lines.push("\u2014 Reality BM");
+  return lines.join("\n");
+}
+function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
+
+/* ---------------- auth / bootstrap ---------------- */
+
+onAuthStateChanged(auth, async (user) => {
+  cleanupListeners();
+  if(!user){ profile=null; render(); return; }
+  try{
+    const snap = await getDoc(doc(db,"users",user.uid));
+    if(!snap.exists()){
+      ui.loginError = "Your account has no role assigned yet. Ask an admin to set it up.";
+      await signOut(auth);
+      return;
+    }
+    const d = snap.data();
+    profile = { uid:user.uid, name:d.name||user.email, role:d.role, customerId:d.customerId||null };
+    ui.view = null;
+    startListeners();
+  }catch(e){
+    ui.loginError = "Could not load your account. Try again.";
+    render();
+  }
+});
+
+function cleanupListeners(){ unsubs.forEach(u=>u&&u()); unsubs=[]; }
+
+function startListeners(){
+  unsubs.push(onSnapshot(collection(db,"customers"), snap=>{ state.customers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  unsubs.push(onSnapshot(collection(db,"drivers"), snap=>{ state.drivers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  unsubs.push(onSnapshot(collection(db,"invoices"), snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  if(profile && profile.role==="admin"){
+    unsubs.push(onSnapshot(collection(db,"users"), snap=>{ state.users = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  }
+  render();
+}
+
+/* ---------------- render root ---------------- */
+
+function render(){
+  const app = el("app");
+  if(!profile){ app.innerHTML = renderLogin(); bindLogin(); return; }
+  app.innerHTML = renderShell();
+  bindShell();
+}
+
+function renderLogin(){
+  return `<div class="login-wrap"><div class="login-box">
+    <div class="brand" style="margin-bottom:18px;">
+      <div class="mark">RB</div>
+      <h1>Reality BM &middot; Delivery Control</h1>
+      <p>Sign in with the account your admin created for you</p>
+    </div>
+    <div class="field"><label>Email</label><input id="li-email" type="email" placeholder="name@company.com"></div>
+    <div class="field"><label>Password</label><input id="li-pass" type="password" placeholder="Password"></div>
+    <button class="btn btn-primary" id="li-submit" style="width:100%;">Sign in</button>
+    ${ui.loginError ? `<p class="err">${esc(ui.loginError)}</p>` : ""}
+  </div></div>`;
+}
+function bindLogin(){
+  el("li-submit").addEventListener("click", async ()=>{
+    ui.loginError = "";
+    const email = el("li-email").value.trim();
+    const pass = el("li-pass").value;
+    if(!email || !pass){ ui.loginError="Enter your email and password."; render(); return; }
+    try{ await signInWithEmailAndPassword(auth, email, pass); }
+    catch(e){ ui.loginError = "Could not sign in. Check your email and password."; render(); }
+  });
+}
+
+/* ---------------- shell ---------------- */
+
+function navItemsFor(role){
+  if(role==="admin") return [["overview","Overview"],["invoices","Invoices"],["pending","Pending items"],["customers","Customers"],["drivers","Drivers"],["users","Users & roles"]];
+  if(role==="warehouse") return [["queue","Invoices"],["pending","Pending items"]];
+  return [["myorders","My orders"]];
+}
+
+function renderShell(){
+  const role = profile.role;
+  const items = navItemsFor(role);
+  if(!ui.view || !items.some(n=>n[0]===ui.view)) ui.view = items[0][0];
+  const navHtml = items.map(n=>`<button class="${ui.view===n[0]?"active":""}" data-nav="${n[0]}">${n[1]}</button>`).join("");
+  const roleLabel = role==="admin"?"Admin":role==="warehouse"?"Warehouse":"Customer";
+  return `<div class="sidebar">
+      <div class="brand"><div class="mark">RB</div><h1>Reality BM</h1><p>Delivery Control</p></div>
+      <nav class="nav">${navHtml}</nav>
+      <div class="session">
+        <div class="who">${esc(profile.name)}</div>
+        <div class="role">${roleLabel}</div>
+        <button class="btn btn-ghost btn-sm" data-act="signout">Sign out</button>
+      </div>
+    </div>
+    <main id="main">${renderView()}</main>
+    ${ui.modal ? renderModal() : ""}`;
+}
+
+function renderView(){
+  if(profile.role==="admin"){
+    if(ui.view==="overview") return viewOverview();
+    if(ui.view==="invoices") return viewInvoicesAdmin();
+    if(ui.view==="pending") return viewPending();
+    if(ui.view==="customers") return viewCustomers();
+    if(ui.view==="drivers") return viewDrivers();
+    if(ui.view==="users") return viewUsers();
+  }
+  if(profile.role==="warehouse"){
+    if(ui.view==="queue") return viewQueueWarehouse();
+    if(ui.view==="pending") return viewPending();
+  }
+  if(profile.role==="customer"){
+    if(ui.view==="myorders") return viewMyOrders();
+  }
+  return "";
+}
+function pageHead(title, sub, action){ return `<div class="pagehead"><div><h2>${title}</h2><p>${sub}</p></div>${action||""}</div>`; }
+function stat(n,l){ return `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`; }
+
+/* ---------------- overview ---------------- */
+
+function viewOverview(){
+  const invs = state.invoices;
+  const pendingCount = invs.reduce((n,i)=>n+pendingOf(i).length,0);
+  const inTransit = invs.filter(i=>i.status==="in_transit").length;
+  const delivered = invs.filter(i=>i.status==="delivered").length;
+  return pageHead("Overview","Today across every order") +
+    `<div class="stats">${stat(invs.length,"Total invoices")}${stat(inTransit,"In transit")}${stat(delivered,"Delivered")}${stat(pendingCount,"Pending items")}</div>
+    <div class="card"><h3 style="margin-bottom:14px;">Recent invoices</h3>${invoicesTable(invs.slice().sort(byCreatedDesc).slice(0,8), true)}</div>`;
+}
+
+function invoicesTable(list, adminView){
+  if(!list.length) return `<div class="empty">No invoices yet.</div>`;
+  return `<table><thead><tr><th>Invoice</th><th>DO No.</th><th>Customer</th><th>Status</th><th>Items</th><th>Created</th></tr></thead><tbody>` +
+    list.map(inv=>{
+      const cust = customerById(inv.customerId);
+      const pend = pendingOf(inv).length;
+      return `<tr class="row-click" data-open-invoice="${inv.id}">
+        <td><b>${esc(inv.invoiceNumber)}</b></td>
+        <td>${esc(inv.doNumber||"\u2014")}</td>
+        <td>${esc(cust?cust.name:"\u2014")}</td>
+        <td><span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span></td>
+        <td>${inv.totalItems||0} total${pend?` <span class="pill pill-rust">${pend} pending</span>`:""}</td>
+        <td class="faint">${fmtDate(inv.createdAt)}</td>
+      </tr>`;
+    }).join("") + `</tbody></table>`;
+}
+
+function viewInvoicesAdmin(){
+  const invs = state.invoices.slice().sort(byCreatedDesc);
+  return pageHead("Invoices","Warehouse creates these \u2014 you can correct or remove a mistaken entry") +
+    `<div class="card">${invoicesTable(invs)}</div>`;
+}
+function viewQueueWarehouse(){
+  const invs = state.invoices.slice().sort(byCreatedDesc);
+  return pageHead("Invoices","Create an invoice from the physical copy, then track pending items", `<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`) +
+    `<div class="card">${invoicesTable(invs)}</div>`;
+}
+
+/* ---------------- pending items ---------------- */
+
+function viewPending(){
+  const rows=[];
+  state.invoices.forEach(inv=>{ pendingOf(inv).forEach(p=>rows.push({inv,item:p})); });
+  const body = !rows.length ? `<div class="empty">No pending items right now.</div>` :
+    `<table><thead><tr><th>Item no.</th><th>Note</th><th>Invoice</th><th>DO No.</th><th>Customer</th><th></th></tr></thead><tbody>` +
+    rows.map(r=>{
+      const cust = customerById(r.inv.customerId);
+      return `<tr><td><b>${esc(r.item.itemNumber)}</b></td><td class="faint">${esc(r.item.note||"\u2014")}</td>
+        <td>${esc(r.inv.invoiceNumber)}</td><td>${esc(r.inv.doNumber||"\u2014")}</td><td>${esc(cust?cust.name:"\u2014")}</td>
+        <td style="text-align:right;"><button class="btn btn-sm" data-act="fulfill-item" data-inv="${r.inv.id}" data-item="${r.item.id}">Tick off</button></td></tr>`;
+    }).join("") + `</tbody></table>`;
+  return pageHead("Pending items","Item numbers marked not-available on the physical invoice \u2014 tick off once restocked and sent") + `<div class="card">${body}</div>`;
+}
+
+/* ---------------- customers / drivers (admin) ---------------- */
+
+function viewCustomers(){
+  const list = state.customers;
+  const body = !list.length ? `<div class="empty">No customers yet.</div>` :
+    `<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
+    list.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
+      <td style="text-align:right;"><button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
+  return pageHead("Customers","People and companies you deliver to", `<button class="btn btn-primary" data-act="new-customer">Add customer</button>`) + `<div class="card">${body}</div>`;
+}
+function viewDrivers(){
+  const list = state.drivers;
+  const body = !list.length ? `<div class="empty">No drivers yet.</div>` :
+    `<table><thead><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th></th></tr></thead><tbody>` +
+    list.map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.phone||"\u2014")}</td><td class="faint">${esc(d.vehicle||"\u2014")}</td>
+      <td style="text-align:right;"><button class="btn btn-sm btn-danger" data-act="del-driver" data-id="${d.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
+  return pageHead("Truck drivers","Drivers you can assign to a delivery", `<button class="btn btn-primary" data-act="new-driver">Add driver</button>`) + `<div class="card">${body}</div>`;
+}
+
+/* ---------------- users & roles (admin) ---------------- */
+
+function viewUsers(){
+  const list = state.users;
+  const body = !list.length ? `<div class="empty">No accounts yet besides your own.</div>` :
+    `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead><tbody>` +
+    list.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.email||"\u2014")}</td><td><span class="pill pill-muted">${esc(u.role)}</span></td></tr>`).join("") +
+    `</tbody></table>`;
+  return pageHead("Users & roles","Create a login for a warehouse teammate or a customer", `<button class="btn btn-primary" data-act="new-user">Add user</button>`) +
+    `<div class="card">${body}</div>`;
+}
+
+/* ---------------- customer: my orders ---------------- */
+
+function viewMyOrders(){
+  const mine = state.invoices.filter(i=>i.customerId===profile.customerId).sort(byCreatedDesc);
+  if(!mine.length) return pageHead("My orders","Nothing on order yet") + `<div class="empty">No orders yet \u2014 check back once Reality BM raises an invoice for you.</div>`;
+  return pageHead("My orders","Track where each order stands") + mine.map(inv=>{
+    const driver = inv.driverId ? driverById(inv.driverId) : null;
+    const pend = pendingOf(inv);
+    return `<div class="card" style="margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+        <div><h3>${esc(inv.invoiceNumber)}</h3><p class="faint">DO ${esc(inv.doNumber||"\u2014")} &middot; ${fmtDate(inv.createdAt)}</p></div>
+        <span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span>
+      </div>
+      <p style="margin-top:12px;">${inv.totalItems||0} items total${pend.length?`, <span style="color:var(--rust);">${pend.length} pending</span>`:", all ready"}</p>
+      ${pend.length ? `<div style="margin-top:10px;">${pend.map(p=>`<div class="itemline"><span class="name">Item ${esc(p.itemNumber)}${p.note?" \u2014 "+esc(p.note):""}</span><span class="pill pill-rust">pending</span></div>`).join("")}</div>` : ""}
+      ${driver ? `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+esc(driver.phone):""}</p>` : ""}
+      ${inv.notes ? `<p class="faint" style="margin-top:6px;">Note: ${esc(inv.notes)}</p>` : ""}
+    </div>`;
+  }).join("");
+}
+
+/* ---------------- modals ---------------- */
+
+function renderModal(){
+  const m = ui.modal;
+  let inner="";
+  if(m.type==="new-customer") inner = customerForm();
+  if(m.type==="new-driver") inner = driverForm();
+  if(m.type==="new-invoice") inner = newInvoiceForm();
+  if(m.type==="new-user") inner = newUserForm();
+  if(m.type==="open-invoice") inner = invoiceDetail(m.id);
+  return `<div class="modal-bg" data-act="close-modal-bg"><div class="modal">${inner}</div></div>`;
+}
+
+function customerForm(){
+  return `<h2>Add customer</h2>
+    <div class="field"><label>Name</label><input id="f-name" placeholder="e.g. Ahmed Khan"></div>
+    <div class="field"><label>Company</label><input id="f-company" placeholder="e.g. Khan Interiors LLC"></div>
+    <div class="field"><label>Phone (WhatsApp)</label><input id="f-phone" placeholder="+9715xxxxxxxx"></div>
+    <div class="field"><label>Address</label><input id="f-address" placeholder="Site or delivery address"></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-customer">Add customer</button></div>`;
+}
+function driverForm(){
+  return `<h2>Add driver</h2>
+    <div class="field"><label>Name</label><input id="f-name" placeholder="e.g. Suresh"></div>
+    <div class="field"><label>Phone</label><input id="f-phone" placeholder="+9715xxxxxxxx"></div>
+    <div class="field"><label>Vehicle / plate</label><input id="f-vehicle" placeholder="e.g. Truck 4, DXB-12345"></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-driver">Add driver</button></div>`;
+}
+function newInvoiceForm(){
+  if(!state.customers.length){
+    return `<h2>New invoice</h2><p class="muted">No customers on file yet \u2014 ask an admin to add one, or add it yourself if you have access.</p>
+      <div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
+  }
+  const custOptions = state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
+  return `<h2>New invoice</h2>
+    <div class="field"><label>Invoice number (from the counter)</label><input id="f-invnum" placeholder="e.g. INV-4021"></div>
+    <div class="field"><label>DO number</label><input id="f-donum" placeholder="e.g. DO-1187"></div>
+    <div class="field"><label>Customer</label><select id="f-customer">${custOptions}</select></div>
+    <div class="field"><label>Total items on invoice</label><input id="f-total" type="number" min="1" placeholder="e.g. 20"></div>
+    <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2"></textarea></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-invoice">Create invoice</button></div>`;
+}
+function newUserForm(){
+  const custOptions = state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
+  return `<h2>Add user</h2>
+    <div class="field"><label>Name</label><input id="f-name" placeholder="Full name"></div>
+    <div class="field"><label>Email</label><input id="f-email" type="email" placeholder="name@company.com"></div>
+    <div class="field"><label>Temporary password</label><input id="f-password" type="text" placeholder="At least 6 characters"></div>
+    <div class="field"><label>Role</label><select id="f-role">
+      <option value="warehouse">Warehouse</option>
+      <option value="customer">Customer</option>
+      <option value="admin">Admin</option>
+    </select></div>
+    <div class="field" id="f-customer-wrap"><label>Linked customer</label><select id="f-customer-link"><option value="">\u2014</option>${custOptions}</select></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-user">Create login</button></div>`;
+}
+
+function invoiceDetail(id){
+  const inv = state.invoices.find(i=>i.id===id);
+  if(!inv) return `<p>Not found.</p><div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
+  const cust = customerById(inv.customerId);
+  const isAdmin = profile.role==="admin";
+  const isWarehouse = profile.role==="warehouse";
+  if(!ui.draftPending || ui.draftPending.invId!==id) ui.draftPending = { invId:id, items:(inv.pendingItems||[]).map(p=>({...p})) };
+  const driverOptions = `<option value="">No driver assigned</option>` + state.drivers.map(d=>`<option value="${d.id}" ${inv.driverId===d.id?"selected":""}>${esc(d.name)}</option>`).join("");
+
+  const pendingRows = `<div class="itemhead"><span>Item no.</span><span>Note</span><span></span></div>` +
+    ui.draftPending.items.map((p,idx)=>`<div class="item-row">
+      <input data-p-field="itemNumber" data-idx="${idx}" value="${esc(p.itemNumber)}" placeholder="e.g. 07">
+      <input data-p-field="note" data-idx="${idx}" value="${esc(p.note||"")}" placeholder="optional note">
+      <button class="btn btn-ghost btn-sm" data-act="remove-pending-row" data-idx="${idx}" aria-label="Remove">&times;</button>
+    </div>`).join("");
+
+  let body = `<h2>${esc(inv.invoiceNumber)}</h2>
+    <p class="faint" style="margin-bottom:16px;">DO ${esc(inv.doNumber||"\u2014")} &middot; ${esc(cust?cust.name:"\u2014")} &middot; <span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span></p>`;
+
+  if(isAdmin){
+    const custOptions = state.customers.map(c=>`<option value="${c.id}" ${c.id===inv.customerId?"selected":""}>${esc(c.name)}</option>`).join("");
+    body += `<div class="field"><label>Invoice number</label><input id="f-invnum-e" value="${esc(inv.invoiceNumber)}"></div>
+      <div class="field"><label>DO number</label><input id="f-donum-e" value="${esc(inv.doNumber||"")}"></div>
+      <div class="field"><label>Customer</label><select id="f-customer-e">${custOptions}</select></div>
+      <div class="field"><label>Total items</label><input id="f-total-e" type="number" min="0" value="${inv.totalItems||0}"></div>`;
+  } else {
+    body += `<p style="margin-bottom:14px;">${inv.totalItems||0} items total</p>`;
+  }
+
+  if(isAdmin || isWarehouse){
+    body += `<h3 style="font-size:14px; margin-bottom:8px;">Pending items (not available)</h3>${pendingRows}
+      <button class="btn btn-sm btn-ghost" data-act="add-pending-row" style="margin-bottom:14px;">+ Add pending item</button>
+      <div class="field"><label>Assign driver</label><select id="f-driver">${driverOptions}</select></div>
+      <div class="modal-actions" style="justify-content:space-between;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-sm" data-act="set-status" data-status="in_transit" data-inv="${inv.id}">Mark in transit</button>
+          <button class="btn btn-sm" data-act="set-status" data-status="delivered" data-inv="${inv.id}">Mark delivered</button>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${isAdmin ? `<button class="btn btn-sm btn-danger" data-act="delete-invoice" data-inv="${inv.id}">Delete</button>` : ""}
+          <button class="btn" data-act="close-modal">Close</button>
+          <button class="btn btn-primary" data-act="save-invoice-detail" data-inv="${inv.id}">Save</button>
+        </div>
+      </div>`;
+  } else {
+    const pend = pendingOf(inv);
+    body += pend.length ? `<div>${pend.map(p=>`<div class="itemline"><span class="name">Item ${esc(p.itemNumber)}${p.note?" \u2014 "+esc(p.note):""}</span><span class="pill pill-rust">pending</span></div>`).join("")}</div>` : `<p class="faint">All items ready.</p>`;
+    body += `<div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
+  }
+
+  if(cust && cust.phone){
+    body += `<div style="border-top:1px solid var(--line); margin-top:16px; padding-top:14px;">
+      <a class="btn btn-sm" href="${waLink(cust.phone, buildStatusMessage(inv))}" target="_blank" rel="noopener">Share WhatsApp update</a>
+      <button class="btn btn-sm btn-ghost" data-act="copy-message" data-inv="${inv.id}">Copy message</button>
+    </div>`;
+  } else {
+    body += `<p class="faint" style="margin-top:14px;">Add a phone number for this customer to send a WhatsApp update.</p>`;
+  }
+  return body;
+}
+
+/* ---------------- events ---------------- */
+
+function bindShell(){
+  document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click", ()=>{ ui.view=b.getAttribute("data-nav"); ui.modal=null; render(); }));
+  const out = document.querySelector('[data-act="signout"]');
+  if(out) out.addEventListener("click", ()=>signOut(auth));
+  const main = el("main");
+  main.addEventListener("click", mainClickHandler);
+  const modalBg = document.querySelector(".modal-bg");
+  if(modalBg){
+    modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
+    modalBg.addEventListener("click", modalClickHandler);
+    const roleSel = el("f-role");
+    if(roleSel) roleSel.addEventListener("change", ()=>{ el("f-customer-wrap").style.display = roleSel.value==="customer" ? "block":"none"; });
+    if(roleSel) roleSel.dispatchEvent(new Event("change"));
+  }
+}
+
+function mainClickHandler(e){
+  const open = e.target.closest("[data-open-invoice]");
+  if(open){ ui.modal={type:"open-invoice", id:open.getAttribute("data-open-invoice")}; ui.draftPending=null; render(); return; }
+  const b = e.target.closest("[data-act]");
+  if(!b) return;
+  const act = b.getAttribute("data-act");
+  if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
+  else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
+  else if(act==="new-driver"){ ui.modal={type:"new-driver"}; render(); }
+  else if(act==="new-user"){ ui.modal={type:"new-user"}; render(); }
+  else if(act==="del-customer"){ if(confirm("Remove this customer?")) deleteDoc(doc(db,"customers",b.getAttribute("data-id"))); }
+  else if(act==="del-driver"){ if(confirm("Remove this driver?")) deleteDoc(doc(db,"drivers",b.getAttribute("data-id"))); }
+  else if(act==="fulfill-item"){ fulfillItem(b.getAttribute("data-inv"), b.getAttribute("data-item")); }
+}
+
+async function modalClickHandler(e){
+  const b = e.target.closest("[data-act]");
+  if(!b) return;
+  const act = b.getAttribute("data-act");
+  if(act==="close-modal"){ ui.modal=null; ui.draftPending=null; render(); }
+  else if(act==="save-customer"){
+    const name = el("f-name").value.trim();
+    if(!name){ showToast("Enter a name"); return; }
+    await addDoc(collection(db,"customers"), { name, company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address").value.trim(), createdAt:Date.now() });
+    ui.modal=null; showToast("Customer added");
+  } else if(act==="save-driver"){
+    const dn = el("f-name").value.trim();
+    if(!dn){ showToast("Enter a name"); return; }
+    await addDoc(collection(db,"drivers"), { name:dn, phone:el("f-phone").value.trim(), vehicle:el("f-vehicle").value.trim(), createdAt:Date.now() });
+    ui.modal=null; showToast("Driver added");
+  } else if(act==="save-invoice"){
+    const num = el("f-invnum").value.trim();
+    const don = el("f-donum").value.trim();
+    const cid = el("f-customer").value;
+    const total = parseInt(el("f-total").value,10)||0;
+    if(!num || !cid){ showToast("Fill in invoice number and customer"); return; }
+    await addDoc(collection(db,"invoices"), {
+      invoiceNumber:num, doNumber:don, customerId:cid, totalItems:total, pendingItems:[],
+      status:"awaiting_dispatch", driverId:null, notes:el("f-notes").value.trim(),
+      createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name
+    });
+    ui.modal=null; showToast("Invoice created");
+  } else if(act==="save-user"){
+    const name = el("f-name").value.trim();
+    const email = el("f-email").value.trim();
+    const password = el("f-password").value;
+    const role = el("f-role").value;
+    const customerId = role==="customer" ? (el("f-customer-link").value||null) : null;
+    if(!name || !email || password.length<6){ showToast("Fill in name, email and a 6+ character password"); return; }
+    try{
+      const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
+      const secondaryAuth = getAuth(secondary);
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      const newUid = cred.user.uid;
+      await signOut(secondaryAuth);
+      await setDoc(doc(db,"users",newUid), { name, email, role, customerId, createdAt:Date.now() });
+      ui.modal=null; showToast("Login created for "+name);
+    }catch(err){
+      showToast("Could not create login \u2014 "+(err.code||"try again"));
+    }
+  } else if(act==="add-pending-row"){
+    ui.draftPending.items.push({ id:uid(), itemNumber:"", note:"", fulfilled:false });
+    render();
+  } else if(act==="remove-pending-row"){
+    ui.draftPending.items.splice(parseInt(b.getAttribute("data-idx"),10),1);
+    render();
+  } else if(act==="save-invoice-detail"){
+    syncPendingFromInputs();
+    const invId = b.getAttribute("data-inv");
+    const inv = state.invoices.find(i=>i.id===invId);
+    const cleanPending = ui.draftPending.items.filter(p=>p.itemNumber.trim()!=="");
+    const patch = { pendingItems:cleanPending, driverId: el("f-driver") ? (el("f-driver").value||null) : inv.driverId, updatedAt:Date.now() };
+    if(profile.role==="admin"){
+      patch.invoiceNumber = el("f-invnum-e").value.trim();
+      patch.doNumber = el("f-donum-e").value.trim();
+      patch.customerId = el("f-customer-e").value;
+      patch.totalItems = parseInt(el("f-total-e").value,10)||0;
+    }
+    await updateDoc(doc(db,"invoices",invId), patch);
+    ui.modal=null; ui.draftPending=null; showToast("Saved");
+  } else if(act==="set-status"){
+    syncPendingFromInputs();
+    const invId2 = b.getAttribute("data-inv");
+    await updateDoc(doc(db,"invoices",invId2), { status:b.getAttribute("data-status"), updatedAt:Date.now() });
+    ui.modal=null; ui.draftPending=null; showToast("Status updated");
+  } else if(act==="delete-invoice"){
+    if(confirm("Delete this invoice? This cannot be undone.")){
+      await deleteDoc(doc(db,"invoices",b.getAttribute("data-inv")));
+      ui.modal=null; showToast("Invoice deleted");
+    }
+  } else if(act==="copy-message"){
+    const inv2 = state.invoices.find(i=>i.id===b.getAttribute("data-inv"));
+    const msg = buildStatusMessage(inv2);
+    if(navigator.clipboard) navigator.clipboard.writeText(msg).then(()=>showToast("Message copied"));
+  }
+}
+
+function syncPendingFromInputs(){
+  if(!ui.draftPending) return;
+  document.querySelectorAll("[data-p-field]").forEach(f=>{
+    const idx = parseInt(f.getAttribute("data-idx"),10);
+    const field = f.getAttribute("data-p-field");
+    const it = ui.draftPending.items[idx];
+    if(!it) return;
+    it[field] = f.value;
+  });
+}
+
+async function fulfillItem(invId, itemId){
+  const inv = state.invoices.find(i=>i.id===invId);
+  if(!inv) return;
+  const items = (inv.pendingItems||[]).map(p=> p.id===itemId ? {...p, fulfilled:true, fulfilledAt:Date.now()} : p);
+  await updateDoc(doc(db,"invoices",invId), { pendingItems:items, updatedAt:Date.now() });
+  showToast("Ticked off");
+}
+
+render();
+</script>
+</body>
+</html>
