@@ -805,9 +805,15 @@ function userForm(u){
 function siteForm(s, lockCustomerId, returnTo){
   const lockedId = lockCustomerId || (s ? s.customerId : null);
   const lockedCust = lockedId ? customerById(lockedId) : null;
+  const currentCust = (!lockedCust && s && s.customerId) ? customerById(s.customerId) : null;
   const custField = lockedCust
     ? `<input type="hidden" id="f-customer" value="${lockedCust.id}"><div class="field"><label>Customer</label><input value="${esc(lockedCust.name)}" disabled></div>`
-    : `<div class="field"><label>Customer</label><select id="f-customer"><option value="">Unassigned \u2014 link later</option>${state.customers.map(c=>`<option value="${c.id}" ${s&&s.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("")}</select></div>`;
+    : `<div class="field" style="position:relative;">
+        <label>Customer</label>
+        <input id="f-customer-search" autocomplete="off" placeholder="Search customer, or leave blank for unassigned" value="${currentCust?esc(currentCust.name):""}">
+        <input type="hidden" id="f-customer" value="${currentCust?currentCust.id:""}">
+        <div id="f-customer-results" class="searchlist" style="display:none; position:absolute; z-index:5; width:100%; background:var(--surface);"></div>
+      </div>`;
   return `<h2>${s?"Edit site":"Add site"}</h2>
     ${custField}
     <div class="field"><label>Site name</label><input id="f-sitename" value="${s?esc(s.siteName):""}" placeholder="e.g. Villa 12, Al Barsha site"></div>
@@ -1068,7 +1074,36 @@ function bindShell(){
     if(editCustSel && editSiteSel){
       editCustSel.addEventListener("change", ()=>{ editSiteSel.innerHTML = siteOptionsHtml(editCustSel.value, null); });
     }
+    bindCustomerPicker();
   }
+}
+
+function bindCustomerPicker(){
+  const search = el("f-customer-search");
+  const hidden = el("f-customer");
+  const results = el("f-customer-results");
+  if(!search || !hidden || !results) return;
+  function showResults(q){
+    const term = q.trim().toLowerCase();
+    const matches = !term ? state.customers.slice(0,30) :
+      state.customers.filter(c=>(c.name||"").toLowerCase().indexOf(term)>-1 || (c.company||"").toLowerCase().indexOf(term)>-1).slice(0,30);
+    let html = `<button type="button" data-pick="" data-name="">Unassigned</button>`;
+    html += matches.map(c=>`<button type="button" data-pick="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</button>`).join("");
+    if(term && !matches.length) html += `<span class="faint" style="display:block; padding:10px 12px;">No match</span>`;
+    results.innerHTML = html;
+    results.style.display = "block";
+    results.querySelectorAll("[data-pick]").forEach(btn=>{
+      btn.addEventListener("mousedown", (e)=>{
+        e.preventDefault();
+        hidden.value = btn.getAttribute("data-pick");
+        search.value = btn.getAttribute("data-name")||"";
+        results.style.display = "none";
+      });
+    });
+  }
+  search.addEventListener("focus", ()=>showResults(search.value));
+  search.addEventListener("input", ()=>showResults(search.value));
+  search.addEventListener("blur", ()=>{ setTimeout(()=>{ results.style.display="none"; }, 150); });
 }
 
 function mainClickHandler(e){
