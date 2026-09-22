@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reality BMT - Al Qouz &middot; Delivery Control</title>
+<title>Reality BM &middot; Delivery Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -221,8 +221,14 @@ function searchBox(id, value, placeholder){
 function statusFilterHtml(id, value){
   return `<select id="${id}" class="filter-select"><option value="">All statuses</option>${STATUS_ORDER.map(s=>`<option value="${s}" ${value===s?"selected":""}>${STATUS_LABEL[s]}</option>`).join("")}</select>`;
 }
-function customerFilterHtml(id, value){
-  return `<select id="${id}" class="filter-select"><option value="">All customers</option>${state.customers.map(c=>`<option value="${c.id}" ${value===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>`;
+function customerFilterPickerHtml(searchId, resultsId, value, placeholder){
+  let label = "";
+  if(value === "__unassigned__") label = "Unassigned";
+  else if(value){ const c = customerById(value); label = c ? c.name : ""; }
+  return `<div class="search-wrap" style="position:relative;">
+    <input id="${searchId}" autocomplete="off" placeholder="${esc(placeholder)}" value="${esc(label)}">
+    <div id="${resultsId}" class="searchlist" style="display:none; position:absolute; z-index:6; top:100%; left:0; width:240px; max-width:60vw; background:var(--surface); margin-top:4px;"></div>
+  </div>`;
 }
 function textMatch(fields, term){
   if(!term) return true;
@@ -489,7 +495,7 @@ function viewPending(){
   if(ui.pendingItemsCustomer) rows = rows.filter(r=>r.inv.customerId===ui.pendingItemsCustomer);
   if(ui.pendingItemsSearch) rows = rows.filter(r=>textMatch([r.item.itemNumber, r.item.note, r.inv.invoiceNumber, r.inv.doNumber], ui.pendingItemsSearch));
 
-  const toolbar = `<div class="toolbar">${searchBox("pending-items-search", ui.pendingItemsSearch, "Search item no., note, or invoice #")}${customerFilterHtml("pending-customer-filter", ui.pendingItemsCustomer)}</div>`;
+  const toolbar = `<div class="toolbar">${searchBox("pending-items-search", ui.pendingItemsSearch, "Search item no., note, or invoice #")}${customerFilterPickerHtml("pending-customer-filter", "pending-customer-results", ui.pendingItemsCustomer, "Filter by customer")}</div>`;
   if(!rows.length) return pageHead("Pending items","Item numbers marked not-available on the physical invoice \u2014 select the ones ready and send them out together", toolbar) +
     `<div class="empty">No pending items right now.</div>`;
 
@@ -622,9 +628,7 @@ function viewRentalDrivers(){
 
 /* ---------------- sites (visible to every role) ---------------- */
 
-function siteCustomerFilterHtml(id, value){
-  return `<select id="${id}" class="filter-select"><option value="">All customers</option><option value="__unassigned__" ${value==="__unassigned__"?"selected":""}>Unassigned</option>${state.customers.map(c=>`<option value="${c.id}" ${value===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}</select>`;
-}
+
 function viewSites(){
   const canEdit = profile.role==="admin" || profile.role==="counter" || profile.role==="warehouse";
   const canDelete = profile.role==="admin";
@@ -638,7 +642,7 @@ function viewSites(){
 
   const toolbar = showStaffControls ? `<div class="toolbar">
     ${searchBox("sites-search", ui.sitesSearch, "Search site name or address")}
-    ${siteCustomerFilterHtml("sites-customer-filter", ui.sitesCustomer)}
+    ${customerFilterPickerHtml("sites-customer-filter", "sites-customer-results", ui.sitesCustomer, "Filter by customer")}
     ${canEdit ? `<button class="btn" data-act="toggle-bulk-edit-sites">${ui.bulkEditSites?"Cancel bulk edit":"Bulk edit"}</button>` : ""}
     ${canEdit ? `<button class="btn" data-act="open-import-sites">Import sites</button>` : ""}
     ${canEdit && !ui.bulkEditSites ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : ""}
@@ -1125,6 +1129,33 @@ function bindFilterSelect(id, onChange){
   node.addEventListener("change", ()=>{ onChange(node.value); render(); });
 }
 
+function bindCustomerFilterPicker(searchId, resultsId, opts){
+  const search = el(searchId);
+  const results = el(resultsId);
+  if(!search || !results) return;
+  function showResults(q){
+    const term = q.trim().toLowerCase();
+    const matches = !term ? state.customers.slice(0,30) :
+      state.customers.filter(c=>(c.name||"").toLowerCase().indexOf(term)>-1 || (c.company||"").toLowerCase().indexOf(term)>-1).slice(0,30);
+    let html = `<button type="button" data-pick="" data-name="">All customers</button>`;
+    if(opts.includeUnassigned) html += `<button type="button" data-pick="__unassigned__" data-name="Unassigned">Unassigned</button>`;
+    html += matches.map(c=>`<button type="button" data-pick="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</button>`).join("");
+    if(term && !matches.length) html += `<span class="faint" style="display:block; padding:10px 12px;">No match</span>`;
+    results.innerHTML = html;
+    results.style.display = "block";
+    results.querySelectorAll("[data-pick]").forEach(btn=>{
+      btn.addEventListener("mousedown", (e)=>{
+        e.preventDefault();
+        results.style.display = "none";
+        opts.onSelect(btn.getAttribute("data-pick"));
+      });
+    });
+  }
+  search.addEventListener("focus", ()=>showResults(search.value));
+  search.addEventListener("input", ()=>showResults(search.value));
+  search.addEventListener("blur", ()=>{ setTimeout(()=>{ results.style.display="none"; }, 150); });
+}
+
 function bindShell(){
   document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click", ()=>{ ui.view=b.getAttribute("data-nav"); ui.modal=null; render(); }));
   const out = document.querySelector('[data-act="signout"]');
@@ -1153,8 +1184,8 @@ function bindShell(){
   bindFilterSelect("overview-status", v=>{ ui.overviewStatus = v; });
   bindFilterSelect("invoices-status", v=>{ ui.invoicesStatus = v; });
   bindFilterSelect("pendingorders-status", v=>{ ui.pendingOrdersStatus = v; });
-  bindFilterSelect("pending-customer-filter", v=>{ ui.pendingItemsCustomer = v; });
-  bindFilterSelect("sites-customer-filter", v=>{ ui.sitesCustomer = v; ui.bulkEditSitesPage = 0; ui.sitesShowLimit = 200; });
+  bindCustomerFilterPicker("pending-customer-filter", "pending-customer-results", { includeUnassigned:false, onSelect:(v)=>{ ui.pendingItemsCustomer = v; render(); } });
+  bindCustomerFilterPicker("sites-customer-filter", "sites-customer-results", { includeUnassigned:true, onSelect:(v)=>{ ui.sitesCustomer = v; ui.bulkEditSitesPage = 0; ui.sitesShowLimit = 200; render(); } });
   const modalBg = document.querySelector(".modal-bg");
   if(modalBg){
     modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
