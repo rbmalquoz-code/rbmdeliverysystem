@@ -15,6 +15,7 @@
   --amber:#C98A1A; --amber-ink:#5A3B08; --amber-bg:#F6E3BE;
   --green:#3F7D4E; --green-ink:#1C3F26; --green-bg:#DDEDE0;
   --rust:#B54A2C; --rust-ink:#5C2313; --rust-bg:#F5DDD3;
+  --violet:#5B4E8C; --violet-ink:#2A2350; --violet-bg:#E4E0F2;
   font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
 }
 @media (prefers-color-scheme: dark){
@@ -25,6 +26,7 @@
     --amber-bg:#3B2E12; --amber:#E0A93D; --amber-ink:#F3D69B;
     --green-bg:#1D3323; --green:#6BB37D; --green-ink:#B9E0C3;
     --rust-bg:#3B2019; --rust:#DE8465; --rust-ink:#F2C3B0;
+    --violet-bg:#2A2547; --violet:#B0A6E0; --violet-ink:#E2DCF6;
   }
 }
 *{box-sizing:border-box;}
@@ -51,6 +53,7 @@ button{cursor:pointer;}
 .pill-amber{background:var(--amber-bg); color:var(--amber-ink);}
 .pill-green{background:var(--green-bg); color:var(--green-ink);}
 .pill-rust{background:var(--rust-bg); color:var(--rust-ink);}
+.pill-violet{background:var(--violet-bg); color:var(--violet-ink);}
 .pill-muted{background:var(--surface-2); color:var(--ink-muted);}
 .card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px;}
 #app{min-height:100vh; display:flex;}
@@ -65,7 +68,7 @@ button{cursor:pointer;}
 .session{margin-top:auto; border-top:1px solid var(--line); padding-top:14px;}
 .session .who{font-size:13px; font-weight:600;}
 .session .role{font-size:12px; color:var(--ink-muted); margin-bottom:10px;}
-main{flex:1; min-width:0; padding:28px 32px 60px; max-width:1100px;}
+main{flex:1; min-width:0; padding:28px 32px 60px; max-width:1180px;}
 .pagehead{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:20px; gap:12px; flex-wrap:wrap;}
 .pagehead p{color:var(--ink-muted); font-size:13.5px; margin-top:2px;}
 .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:24px;}
@@ -80,7 +83,7 @@ tr:last-child td{border-bottom:none;}
 .row-click:hover{background:var(--surface-2);}
 .empty{color:var(--ink-faint); font-size:13.5px; padding:30px 10px; text-align:center; border:1px dashed var(--line); border-radius:10px;}
 .modal-bg{position:fixed; inset:0; background:rgba(20,24,20,0.45); display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto; z-index:50;}
-.modal{background:var(--surface); border-radius:14px; padding:24px; width:100%; max-width:560px; border:1px solid var(--line);}
+.modal{background:var(--surface); border-radius:14px; padding:24px; width:100%; max-width:580px; border:1px solid var(--line);}
 .modal h2{font-size:17px;}
 .modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:18px; flex-wrap:wrap;}
 .item-row{display:grid; grid-template-columns:110px 1fr 32px; gap:8px; align-items:center; margin-bottom:8px;}
@@ -95,6 +98,17 @@ tr:last-child td{border-bottom:none;}
 .err{color:var(--rust); font-size:12.5px; margin-top:8px;}
 .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:999px; font-size:13px; font-weight:500; z-index:80; opacity:0; pointer-events:none; transition:opacity .2s;}
 .toast.show{opacity:1;}
+.kanban{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+.kcol{background:var(--surface-2); border-radius:12px; padding:12px;}
+.kcol h4{font-size:12.5px; text-transform:uppercase; letter-spacing:0.03em; color:var(--ink-muted); margin-bottom:10px; display:flex; justify-content:space-between;}
+.kcard{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:11px 12px; margin-bottom:8px; cursor:pointer; font-size:13px;}
+.kcard:hover{border-color:var(--steel);}
+.kcard b{display:block; font-size:13.5px; margin-bottom:2px;}
+.hist{max-height:180px; overflow-y:auto; border-top:1px solid var(--line); margin-top:14px; padding-top:10px;}
+.hist-row{font-size:12.5px; padding:5px 0; color:var(--ink-muted); border-bottom:1px dashed var(--line);}
+.hist-row:last-child{border-bottom:none;}
+.hist-row b{color:var(--ink); font-weight:600;}
+@media (max-width:900px){ .kanban{grid-template-columns:1fr;} }
 @media (max-width:760px){
   #app{flex-direction:column;}
   .sidebar{position:relative; width:100%; height:auto; flex-direction:row; align-items:center; overflow-x:auto;}
@@ -118,10 +132,6 @@ import {
   getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot, query, where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-/* ============================================================
-   1) PASTE YOUR FIREBASE CONFIG HERE (from Firebase Console >
-      Project settings > General > Your apps > SDK setup).
-   ============================================================ */
 const firebaseConfig = {
   apiKey: "AIzaSyCr4ZfBTssAOHsHlkdbw_gOggaIV9hofLU",
   authDomain: "rbmdeliverysystem.firebaseapp.com",
@@ -135,18 +145,13 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const STATUS_LABEL = {
-  awaiting_dispatch: "Yet to be delivered",
-  in_transit: "In transit",
-  delivered: "Delivered"
-};
-const STATUS_PILL = {
-  awaiting_dispatch: "pill-amber",
-  in_transit: "pill-steel",
-  delivered: "pill-green"
-};
+const STATUS_LABEL = { ordered:"Ordered", getting_ready:"Getting ready", in_transit:"In transit", delivered:"Delivered" };
+const STATUS_PILL = { ordered:"pill-muted", getting_ready:"pill-amber", in_transit:"pill-steel", delivered:"pill-green" };
+const STATUS_ORDER = ["ordered","getting_ready","in_transit","delivered"];
+const NEXT_STATUS = { ordered:"getting_ready", getting_ready:"in_transit", in_transit:"delivered" };
+const NEXT_LABEL = { ordered:"Start getting ready", getting_ready:"Mark in transit", in_transit:"Mark delivered" };
 
-let profile = null;      // { uid, name, role, customerId }
+let profile = null;
 let state = { customers: [], drivers: [], invoices: [], users: [] };
 let unsubs = [];
 let ui = { view: null, modal: null, draftPending: null, loginError: "" };
@@ -155,11 +160,15 @@ function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString
 function el(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function fmtDate(ts){ if(!ts) return ""; return new Date(ts).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
+function fmtDateTime(ts){ if(!ts) return ""; return new Date(ts).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }
 function showToast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); }
 function customerById(id){ return state.customers.find(c=>c.id===id); }
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 function pendingOf(inv){ return (inv.pendingItems||[]).filter(p=>!p.fulfilled); }
 function waLink(phone, text){ const digits=String(phone||"").replace(/[^0-9]/g,""); return "https://wa.me/"+digits+"?text="+encodeURIComponent(text); }
+function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
+function histLine(text){ return { at:Date.now(), byName:profile.name, byRole:profile.role, text }; }
+function withHist(inv, text){ const h=(inv.history||[]).slice(-39); h.push(histLine(text)); return h; }
 function buildStatusMessage(inv){
   const cust = customerById(inv.customerId);
   const driver = inv.driverId ? driverById(inv.driverId) : null;
@@ -168,12 +177,11 @@ function buildStatusMessage(inv){
   lines.push("Hi "+(cust?cust.name:"there")+", update on your order "+inv.invoiceNumber+(inv.doNumber?" (DO "+inv.doNumber+")":"")+" from Reality Building Materials:");
   lines.push("Status: "+(STATUS_LABEL[inv.status]||inv.status));
   if(inv.totalItems) lines.push("Items: "+inv.totalItems+" total"+(pend.length ? ", "+pend.length+" pending (will follow separately)" : ", all ready"));
-  if(driver) lines.push("Driver: "+driver.name+(driver.phone?" ("+driver.phone+")":""));
+  if(driver && inv.status==="in_transit") lines.push("Driver: "+driver.name+(driver.phone?" ("+driver.phone+")":""));
   if(inv.notes) lines.push("Note: "+inv.notes);
   lines.push("\u2014 Reality BM");
   return lines.join("\n");
 }
-function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
 
 /* ---------------- auth / bootstrap ---------------- */
 
@@ -188,7 +196,7 @@ onAuthStateChanged(auth, async (user) => {
       return;
     }
     const d = snap.data();
-    profile = { uid:user.uid, name:d.name||user.email, role:d.role, customerId:d.customerId||null };
+    profile = { uid:user.uid, name:d.name||user.email, role:d.role, customerId:d.customerId||null, driverId:d.driverId||null };
     ui.view = null;
     startListeners();
   }catch(e){
@@ -200,16 +208,23 @@ onAuthStateChanged(auth, async (user) => {
 function cleanupListeners(){ unsubs.forEach(u=>u&&u()); unsubs=[]; }
 
 function startListeners(){
+  const role = profile.role;
+
+  if(role==="admin" || role==="warehouse" || role==="driver"){
+    unsubs.push(onSnapshot(collection(db,"customers"), snap=>{ state.customers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  }
   unsubs.push(onSnapshot(collection(db,"drivers"), snap=>{ state.drivers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
 
-  if(profile.role==="customer"){
+  if(role==="customer"){
     const invQ = query(collection(db,"invoices"), where("customerId","==",profile.customerId));
     unsubs.push(onSnapshot(invQ, snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  } else if(role==="driver"){
+    const invQ = query(collection(db,"invoices"), where("driverId","==",profile.driverId));
+    unsubs.push(onSnapshot(invQ, snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   } else {
-    unsubs.push(onSnapshot(collection(db,"customers"), snap=>{ state.customers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
     unsubs.push(onSnapshot(collection(db,"invoices"), snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
-  if(profile.role==="admin"){
+  if(role==="admin"){
     unsubs.push(onSnapshot(collection(db,"users"), snap=>{ state.users = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
   render();
@@ -251,8 +266,9 @@ function bindLogin(){
 /* ---------------- shell ---------------- */
 
 function navItemsFor(role){
-  if(role==="admin") return [["overview","Overview"],["invoices","Invoices"],["pending","Pending items"],["customers","Customers"],["drivers","Drivers"],["users","Users & roles"]];
-  if(role==="warehouse") return [["queue","Invoices"],["pending","Pending items"]];
+  if(role==="admin") return [["live","Live dashboard"],["overview","Overview"],["pendingorders","Pending orders"],["invoices","Invoices"],["pending","Pending items"],["customers","Customers"],["drivers","Drivers"],["users","Users & roles"]];
+  if(role==="warehouse") return [["queue","Invoices"],["pendingorders","Pending orders"],["pending","Pending items"]];
+  if(role==="driver") return [["mydeliveries","My deliveries"]];
   return [["myorders","My orders"]];
 }
 
@@ -261,7 +277,7 @@ function renderShell(){
   const items = navItemsFor(role);
   if(!ui.view || !items.some(n=>n[0]===ui.view)) ui.view = items[0][0];
   const navHtml = items.map(n=>`<button class="${ui.view===n[0]?"active":""}" data-nav="${n[0]}">${n[1]}</button>`).join("");
-  const roleLabel = role==="admin"?"Admin":role==="warehouse"?"Warehouse":"Customer";
+  const roleLabel = role==="admin"?"Admin":role==="warehouse"?"Warehouse":role==="driver"?"Driver":"Customer";
   return `<div class="sidebar">
       <div class="brand"><div class="mark">RB</div><h1>Reality BM</h1><p>Delivery Control</p></div>
       <nav class="nav">${navHtml}</nav>
@@ -276,25 +292,53 @@ function renderShell(){
 }
 
 function renderView(){
-  if(profile.role==="admin"){
+  const role = profile.role;
+  if(role==="admin"){
+    if(ui.view==="live") return viewLive();
     if(ui.view==="overview") return viewOverview();
+    if(ui.view==="pendingorders") return viewPendingOrders();
     if(ui.view==="invoices") return viewInvoicesAdmin();
     if(ui.view==="pending") return viewPending();
     if(ui.view==="customers") return viewCustomers();
     if(ui.view==="drivers") return viewDrivers();
     if(ui.view==="users") return viewUsers();
   }
-  if(profile.role==="warehouse"){
+  if(role==="warehouse"){
     if(ui.view==="queue") return viewQueueWarehouse();
+    if(ui.view==="pendingorders") return viewPendingOrders();
     if(ui.view==="pending") return viewPending();
   }
-  if(profile.role==="customer"){
+  if(role==="driver"){
+    if(ui.view==="mydeliveries") return viewMyDeliveries();
+  }
+  if(role==="customer"){
     if(ui.view==="myorders") return viewMyOrders();
   }
   return "";
 }
 function pageHead(title, sub, action){ return `<div class="pagehead"><div><h2>${title}</h2><p>${sub}</p></div>${action||""}</div>`; }
 function stat(n,l){ return `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`; }
+
+/* ---------------- admin: live dashboard ---------------- */
+
+function viewLive(){
+  const cols = ["ordered","getting_ready","in_transit"];
+  const html = cols.map(st=>{
+    const list = state.invoices.filter(i=>i.status===st).sort(byCreatedDesc);
+    return `<div class="kcol"><h4>${STATUS_LABEL[st]} <span>${list.length}</span></h4>` +
+      (list.length ? list.map(inv=>{
+        const cust = customerById(inv.customerId);
+        const pend = pendingOf(inv).length;
+        return `<div class="kcard" data-open-invoice="${inv.id}">
+          <b>${esc(inv.invoiceNumber)}</b>
+          <span class="faint">${esc(cust?cust.name:"\u2014")}</span><br>
+          ${pend?`<span class="pill pill-rust" style="margin-top:4px;">${pend} pending</span>`:""}
+        </div>`;
+      }).join("") : `<p class="faint" style="font-size:12.5px;">Nothing here.</p>`) +
+      `</div>`;
+  }).join("");
+  return pageHead("Live dashboard","Everything currently moving through the pipeline, in real time") + `<div class="kanban">${html}</div>`;
+}
 
 /* ---------------- overview ---------------- */
 
@@ -305,10 +349,10 @@ function viewOverview(){
   const delivered = invs.filter(i=>i.status==="delivered").length;
   return pageHead("Overview","Today across every order") +
     `<div class="stats">${stat(invs.length,"Total invoices")}${stat(inTransit,"In transit")}${stat(delivered,"Delivered")}${stat(pendingCount,"Pending items")}</div>
-    <div class="card"><h3 style="margin-bottom:14px;">Recent invoices</h3>${invoicesTable(invs.slice().sort(byCreatedDesc).slice(0,8), true)}</div>`;
+    <div class="card"><h3 style="margin-bottom:14px;">Recent invoices</h3>${invoicesTable(invs.slice().sort(byCreatedDesc).slice(0,8))}</div>`;
 }
 
-function invoicesTable(list, adminView){
+function invoicesTable(list){
   if(!list.length) return `<div class="empty">No invoices yet.</div>`;
   return `<table><thead><tr><th>Invoice</th><th>DO No.</th><th>Customer</th><th>Status</th><th>Items</th><th>Created</th></tr></thead><tbody>` +
     list.map(inv=>{
@@ -318,7 +362,7 @@ function invoicesTable(list, adminView){
         <td><b>${esc(inv.invoiceNumber)}</b></td>
         <td>${esc(inv.doNumber||"\u2014")}</td>
         <td>${esc(cust?cust.name:"\u2014")}</td>
-        <td><span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span></td>
+        <td><span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]||inv.status}</span></td>
         <td>${inv.totalItems||0} total${pend?` <span class="pill pill-rust">${pend} pending</span>`:""}</td>
         <td class="faint">${fmtDate(inv.createdAt)}</td>
       </tr>`;
@@ -326,14 +370,17 @@ function invoicesTable(list, adminView){
 }
 
 function viewInvoicesAdmin(){
-  const invs = state.invoices.slice().sort(byCreatedDesc);
   return pageHead("Invoices","Warehouse creates these \u2014 you can correct or remove a mistaken entry") +
-    `<div class="card">${invoicesTable(invs)}</div>`;
+    `<div class="card">${invoicesTable(state.invoices.slice().sort(byCreatedDesc))}</div>`;
 }
 function viewQueueWarehouse(){
-  const invs = state.invoices.slice().sort(byCreatedDesc);
   return pageHead("Invoices","Create an invoice from the physical copy, then track pending items", `<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`) +
-    `<div class="card">${invoicesTable(invs)}</div>`;
+    `<div class="card">${invoicesTable(state.invoices.slice().sort(byCreatedDesc))}</div>`;
+}
+function viewPendingOrders(){
+  const list = state.invoices.filter(i=>i.status!=="delivered").sort(byCreatedDesc);
+  return pageHead("Pending orders","Orders still moving through the pipeline \u2014 not yet delivered") +
+    `<div class="card">${invoicesTable(list)}</div>`;
 }
 
 /* ---------------- pending items ---------------- */
@@ -359,7 +406,8 @@ function viewCustomers(){
   const body = !list.length ? `<div class="empty">No customers yet.</div>` :
     `<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
     list.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
-      <td style="text-align:right;"><button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
+      <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-customer" data-id="${c.id}">Edit</button>
+      <button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
   return pageHead("Customers","People and companies you deliver to", `<button class="btn btn-primary" data-act="new-customer">Add customer</button>`) + `<div class="card">${body}</div>`;
 }
 function viewDrivers(){
@@ -367,8 +415,9 @@ function viewDrivers(){
   const body = !list.length ? `<div class="empty">No drivers yet.</div>` :
     `<table><thead><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th></th></tr></thead><tbody>` +
     list.map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.phone||"\u2014")}</td><td class="faint">${esc(d.vehicle||"\u2014")}</td>
-      <td style="text-align:right;"><button class="btn btn-sm btn-danger" data-act="del-driver" data-id="${d.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
-  return pageHead("Truck drivers","Drivers you can assign to a delivery", `<button class="btn btn-primary" data-act="new-driver">Add driver</button>`) + `<div class="card">${body}</div>`;
+      <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-driver" data-id="${d.id}">Edit</button>
+      <button class="btn btn-sm btn-danger" data-act="del-driver" data-id="${d.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
+  return pageHead("Truck drivers","Drivers you can assign to a delivery, and link to a driver login", `<button class="btn btn-primary" data-act="new-driver">Add driver</button>`) + `<div class="card">${body}</div>`;
 }
 
 /* ---------------- users & roles (admin) ---------------- */
@@ -376,20 +425,46 @@ function viewDrivers(){
 function viewUsers(){
   const list = state.users;
   const body = !list.length ? `<div class="empty">No accounts yet besides your own.</div>` :
-    `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead><tbody>` +
-    list.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.email||"\u2014")}</td><td><span class="pill pill-muted">${esc(u.role)}</span></td></tr>`).join("") +
+    `<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody>` +
+    list.map(u=>`<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.email||"\u2014")}</td><td><span class="pill pill-muted">${esc(u.role)}</span></td>
+      <td style="text-align:right;"><button class="btn btn-sm" data-act="edit-user" data-id="${u.id}">Edit</button></td></tr>`).join("") +
     `</tbody></table>`;
-  return pageHead("Users & roles","Create a login for a warehouse teammate or a customer", `<button class="btn btn-primary" data-act="new-user">Add user</button>`) +
-    `<div class="card">${body}</div>`;
+  return pageHead("Users & roles","Create a login for a warehouse teammate, driver or customer", `<button class="btn btn-primary" data-act="new-user">Add user</button>`) +
+    `<div class="card">${body}</div>
+    <p class="faint" style="margin-top:12px;">Editing here changes name/role only. Email and password are managed in the Firebase console.</p>`;
+}
+
+/* ---------------- driver: my deliveries ---------------- */
+
+function viewMyDeliveries(){
+  const mine = state.invoices.filter(i=>i.status!=="delivered").sort(byCreatedDesc);
+  if(!mine.length) return pageHead("My deliveries","Nothing assigned right now") + `<div class="empty">No active deliveries assigned to you.</div>`;
+  return pageHead("My deliveries","Mark in transit once you're on your way") + mine.map(inv=>{
+    const cust = customerById(inv.customerId);
+    const pend = pendingOf(inv).length;
+    const canGo = inv.status==="ordered" || inv.status==="getting_ready";
+    return `<div class="card" style="margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+        <div><h3>${esc(inv.invoiceNumber)}</h3><p class="faint">DO ${esc(inv.doNumber||"\u2014")}</p></div>
+        <span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span>
+      </div>
+      <p style="margin-top:12px;"><b>${esc(cust?cust.name:"\u2014")}</b>${cust&&cust.company?" \u2014 "+esc(cust.company):""}</p>
+      ${cust&&cust.address ? `<p class="faint" style="margin-top:2px;">${esc(cust.address)}</p>` : ""}
+      ${cust&&cust.phone ? `<p class="faint" style="margin-top:2px;">${esc(cust.phone)}</p>` : ""}
+      <p style="margin-top:10px;">${inv.totalItems||0} items total${pend?`, ${pend} pending`:""}</p>
+      ${canGo ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;" data-act="driver-in-transit" data-inv="${inv.id}">Mark in transit</button>` : `<p class="faint" style="margin-top:12px;">Already on the way or delivered.</p>`}
+    </div>`;
+  }).join("");
 }
 
 /* ---------------- customer: my orders ---------------- */
 
 function viewMyOrders(){
-  const mine = state.invoices.filter(i=>i.customerId===profile.customerId).sort(byCreatedDesc);
+  const mine = state.invoices.slice().sort(byCreatedDesc);
   if(!mine.length) return pageHead("My orders","Nothing on order yet") + `<div class="empty">No orders yet \u2014 check back once Reality BM raises an invoice for you.</div>`;
   return pageHead("My orders","Track where each order stands") + mine.map(inv=>{
     const driver = inv.driverId ? driverById(inv.driverId) : null;
+    const showDriver = driver && (inv.status==="in_transit" || inv.status==="delivered");
     const pend = pendingOf(inv);
     return `<div class="card" style="margin-bottom:14px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
@@ -398,7 +473,7 @@ function viewMyOrders(){
       </div>
       <p style="margin-top:12px;">${inv.totalItems||0} items total${pend.length?`, <span style="color:var(--rust);">${pend.length} pending</span>`:", all ready"}</p>
       ${pend.length ? `<div style="margin-top:10px;">${pend.map(p=>`<div class="itemline"><span class="name">Item ${esc(p.itemNumber)}${p.note?" \u2014 "+esc(p.note):""}</span><span class="pill pill-rust">pending</span></div>`).join("")}</div>` : ""}
-      ${driver ? `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+esc(driver.phone):""}</p>` : ""}
+      ${showDriver ? `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+esc(driver.phone):""}</p>` : ""}
       ${inv.notes ? `<p class="faint" style="margin-top:6px;">Note: ${esc(inv.notes)}</p>` : ""}
     </div>`;
   }).join("");
@@ -409,56 +484,66 @@ function viewMyOrders(){
 function renderModal(){
   const m = ui.modal;
   let inner="";
-  if(m.type==="new-customer") inner = customerForm();
-  if(m.type==="new-driver") inner = driverForm();
+  if(m.type==="new-customer") inner = customerForm(null);
+  if(m.type==="edit-customer") inner = customerForm(customerById(m.id));
+  if(m.type==="new-driver") inner = driverForm(null);
+  if(m.type==="edit-driver") inner = driverForm(driverById(m.id));
   if(m.type==="new-invoice") inner = newInvoiceForm();
-  if(m.type==="new-user") inner = newUserForm();
+  if(m.type==="new-user") inner = userForm(null);
+  if(m.type==="edit-user") inner = userForm(state.users.find(u=>u.id===m.id));
   if(m.type==="open-invoice") inner = invoiceDetail(m.id);
   return `<div class="modal-bg" data-act="close-modal-bg"><div class="modal">${inner}</div></div>`;
 }
 
-function customerForm(){
-  return `<h2>Add customer</h2>
-    <div class="field"><label>Name</label><input id="f-name" placeholder="e.g. Ahmed Khan"></div>
-    <div class="field"><label>Company</label><input id="f-company" placeholder="e.g. Khan Interiors LLC"></div>
-    <div class="field"><label>Phone (WhatsApp)</label><input id="f-phone" placeholder="+9715xxxxxxxx"></div>
-    <div class="field"><label>Address</label><input id="f-address" placeholder="Site or delivery address"></div>
-    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-customer">Add customer</button></div>`;
+function customerForm(c){
+  return `<h2>${c?"Edit customer":"Add customer"}</h2>
+    <div class="field"><label>Name</label><input id="f-name" value="${c?esc(c.name):""}" placeholder="e.g. Ahmed Khan"></div>
+    <div class="field"><label>Company</label><input id="f-company" value="${c?esc(c.company||""):""}" placeholder="e.g. Khan Interiors LLC"></div>
+    <div class="field"><label>Phone (WhatsApp)</label><input id="f-phone" value="${c?esc(c.phone||""):""}" placeholder="+9715xxxxxxxx"></div>
+    <div class="field"><label>Address</label><input id="f-address" value="${c?esc(c.address||""):""}" placeholder="Site or delivery address"></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-customer" data-id="${c?c.id:""}">${c?"Save changes":"Add customer"}</button></div>`;
 }
-function driverForm(){
-  return `<h2>Add driver</h2>
-    <div class="field"><label>Name</label><input id="f-name" placeholder="e.g. Suresh"></div>
-    <div class="field"><label>Phone</label><input id="f-phone" placeholder="+9715xxxxxxxx"></div>
-    <div class="field"><label>Vehicle / plate</label><input id="f-vehicle" placeholder="e.g. Truck 4, DXB-12345"></div>
-    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-driver">Add driver</button></div>`;
+function driverForm(d){
+  return `<h2>${d?"Edit driver":"Add driver"}</h2>
+    <div class="field"><label>Name</label><input id="f-name" value="${d?esc(d.name):""}" placeholder="e.g. Suresh"></div>
+    <div class="field"><label>Phone</label><input id="f-phone" value="${d?esc(d.phone||""):""}" placeholder="+9715xxxxxxxx"></div>
+    <div class="field"><label>Vehicle / plate</label><input id="f-vehicle" value="${d?esc(d.vehicle||""):""}" placeholder="e.g. Truck 4, DXB-12345"></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-driver" data-id="${d?d.id:""}">${d?"Save changes":"Add driver"}</button></div>`;
 }
 function newInvoiceForm(){
   if(!state.customers.length){
-    return `<h2>New invoice</h2><p class="muted">No customers on file yet \u2014 ask an admin to add one, or add it yourself if you have access.</p>
+    return `<h2>New invoice</h2><p class="muted">No customers on file yet \u2014 ask an admin to add one.</p>
       <div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
   }
   const custOptions = state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
+  const driverOptions = `<option value="">Assign later</option>` + state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
   return `<h2>New invoice</h2>
     <div class="field"><label>Invoice number (from the counter)</label><input id="f-invnum" placeholder="e.g. INV-4021"></div>
     <div class="field"><label>DO number</label><input id="f-donum" placeholder="e.g. DO-1187"></div>
     <div class="field"><label>Customer</label><select id="f-customer">${custOptions}</select></div>
     <div class="field"><label>Total items on invoice</label><input id="f-total" type="number" min="1" placeholder="e.g. 20"></div>
+    <div class="field"><label>Driver (optional, can assign later)</label><select id="f-driver-new">${driverOptions}</select></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2"></textarea></div>
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-invoice">Create invoice</button></div>`;
 }
-function newUserForm(){
-  const custOptions = state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
-  return `<h2>Add user</h2>
-    <div class="field"><label>Name</label><input id="f-name" placeholder="Full name"></div>
+function userForm(u){
+  const custOptions = state.customers.map(c=>`<option value="${c.id}" ${u&&u.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
+  const drvOptions = state.drivers.map(d=>`<option value="${d.id}" ${u&&u.driverId===d.id?"selected":""}>${esc(d.name)}</option>`).join("");
+  const role = u ? u.role : "warehouse";
+  return `<h2>${u?"Edit user":"Add user"}</h2>
+    <div class="field"><label>Name</label><input id="f-name" value="${u?esc(u.name):""}" placeholder="Full name"></div>
+    ${u ? `<p class="faint" style="margin-bottom:12px;">${esc(u.email||"")}</p>` : `
     <div class="field"><label>Email</label><input id="f-email" type="email" placeholder="name@company.com"></div>
-    <div class="field"><label>Temporary password</label><input id="f-password" type="text" placeholder="At least 6 characters"></div>
+    <div class="field"><label>Temporary password</label><input id="f-password" type="text" placeholder="At least 6 characters"></div>`}
     <div class="field"><label>Role</label><select id="f-role">
-      <option value="warehouse">Warehouse</option>
-      <option value="customer">Customer</option>
-      <option value="admin">Admin</option>
+      <option value="warehouse" ${role==="warehouse"?"selected":""}>Warehouse</option>
+      <option value="driver" ${role==="driver"?"selected":""}>Driver</option>
+      <option value="customer" ${role==="customer"?"selected":""}>Customer</option>
+      <option value="admin" ${role==="admin"?"selected":""}>Admin</option>
     </select></div>
     <div class="field" id="f-customer-wrap"><label>Linked customer</label><select id="f-customer-link"><option value="">\u2014</option>${custOptions}</select></div>
-    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-user">Create login</button></div>`;
+    <div class="field" id="f-driver-wrap"><label>Linked driver</label><select id="f-driver-link"><option value="">\u2014</option>${drvOptions}</select></div>
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-user" data-id="${u?u.id:""}">${u?"Save changes":"Create login"}</button></div>`;
 }
 
 function invoiceDetail(id){
@@ -486,38 +571,39 @@ function invoiceDetail(id){
       <div class="field"><label>DO number</label><input id="f-donum-e" value="${esc(inv.doNumber||"")}"></div>
       <div class="field"><label>Customer</label><select id="f-customer-e">${custOptions}</select></div>
       <div class="field"><label>Total items</label><input id="f-total-e" type="number" min="0" value="${inv.totalItems||0}"></div>`;
-  } else {
+  } else if(profile.role!=="customer" && profile.role!=="driver") {
     body += `<p style="margin-bottom:14px;">${inv.totalItems||0} items total</p>`;
   }
 
   if(isAdmin || isWarehouse){
+    const nextKey = NEXT_STATUS[inv.status];
     body += `<h3 style="font-size:14px; margin-bottom:8px;">Pending items (not available)</h3>${pendingRows}
       <button class="btn btn-sm btn-ghost" data-act="add-pending-row" style="margin-bottom:14px;">+ Add pending item</button>
       <div class="field"><label>Assign driver</label><select id="f-driver">${driverOptions}</select></div>
       <div class="modal-actions" style="justify-content:space-between;">
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="btn btn-sm" data-act="set-status" data-status="in_transit" data-inv="${inv.id}">Mark in transit</button>
-          <button class="btn btn-sm" data-act="set-status" data-status="delivered" data-inv="${inv.id}">Mark delivered</button>
+          ${nextKey ? `<button class="btn btn-sm" data-act="set-status" data-status="${nextKey}" data-inv="${inv.id}">${NEXT_LABEL[inv.status]}</button>` : ""}
+          ${isAdmin ? `<select id="f-status-override" style="width:auto; display:inline-block;">${STATUS_ORDER.map(s=>`<option value="${s}" ${s===inv.status?"selected":""}>${STATUS_LABEL[s]}</option>`).join("")}</select>
+          <button class="btn btn-sm" data-act="override-status" data-inv="${inv.id}">Set status</button>` : ""}
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           ${isAdmin ? `<button class="btn btn-sm btn-danger" data-act="delete-invoice" data-inv="${inv.id}">Delete</button>` : ""}
           <button class="btn" data-act="close-modal">Close</button>
           <button class="btn btn-primary" data-act="save-invoice-detail" data-inv="${inv.id}">Save</button>
         </div>
-      </div>`;
+      </div>
+      <div class="hist">${(inv.history||[]).slice().reverse().map(h=>`<div class="hist-row"><b>${esc(h.byName)}</b> (${esc(h.byRole)}) \u2014 ${esc(h.text)} <span class="faint">${fmtDateTime(h.at)}</span></div>`).join("") || `<p class="faint">No activity yet.</p>`}</div>`;
   } else {
     const pend = pendingOf(inv);
     body += pend.length ? `<div>${pend.map(p=>`<div class="itemline"><span class="name">Item ${esc(p.itemNumber)}${p.note?" \u2014 "+esc(p.note):""}</span><span class="pill pill-rust">pending</span></div>`).join("")}</div>` : `<p class="faint">All items ready.</p>`;
     body += `<div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
   }
 
-  if(cust && cust.phone){
+  if((isAdmin||isWarehouse) && cust && cust.phone){
     body += `<div style="border-top:1px solid var(--line); margin-top:16px; padding-top:14px;">
       <a class="btn btn-sm" href="${waLink(cust.phone, buildStatusMessage(inv))}" target="_blank" rel="noopener">Share WhatsApp update</a>
       <button class="btn btn-sm btn-ghost" data-act="copy-message" data-inv="${inv.id}">Copy message</button>
     </div>`;
-  } else {
-    body += `<p class="faint" style="margin-top:14px;">Add a phone number for this customer to send a WhatsApp update.</p>`;
   }
   return body;
 }
@@ -535,8 +621,10 @@ function bindShell(){
     modalBg.addEventListener("click", e=>{ if(e.target.getAttribute("data-act")==="close-modal-bg"){ ui.modal=null; ui.draftPending=null; render(); } });
     modalBg.addEventListener("click", modalClickHandler);
     const roleSel = el("f-role");
-    if(roleSel) roleSel.addEventListener("change", ()=>{ el("f-customer-wrap").style.display = roleSel.value==="customer" ? "block":"none"; });
-    if(roleSel) roleSel.dispatchEvent(new Event("change"));
+    if(roleSel){
+      const sync = ()=>{ el("f-customer-wrap").style.display = roleSel.value==="customer" ? "block":"none"; el("f-driver-wrap").style.display = roleSel.value==="driver" ? "block":"none"; };
+      roleSel.addEventListener("change", sync); sync();
+    }
   }
 }
 
@@ -548,11 +636,15 @@ function mainClickHandler(e){
   const act = b.getAttribute("data-act");
   if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
+  else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
   else if(act==="new-driver"){ ui.modal={type:"new-driver"}; render(); }
+  else if(act==="edit-driver"){ ui.modal={type:"edit-driver", id:b.getAttribute("data-id")}; render(); }
   else if(act==="new-user"){ ui.modal={type:"new-user"}; render(); }
+  else if(act==="edit-user"){ ui.modal={type:"edit-user", id:b.getAttribute("data-id")}; render(); }
   else if(act==="del-customer"){ if(confirm("Remove this customer?")) deleteDoc(doc(db,"customers",b.getAttribute("data-id"))); }
   else if(act==="del-driver"){ if(confirm("Remove this driver?")) deleteDoc(doc(db,"drivers",b.getAttribute("data-id"))); }
   else if(act==="fulfill-item"){ fulfillItem(b.getAttribute("data-inv"), b.getAttribute("data-item")); }
+  else if(act==="driver-in-transit"){ driverMarkInTransit(b.getAttribute("data-inv")); }
 }
 
 async function modalClickHandler(e){
@@ -563,39 +655,54 @@ async function modalClickHandler(e){
   else if(act==="save-customer"){
     const name = el("f-name").value.trim();
     if(!name){ showToast("Enter a name"); return; }
-    await addDoc(collection(db,"customers"), { name, company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address").value.trim(), createdAt:Date.now() });
-    ui.modal=null; render(); showToast("Customer added");
+    const data = { name, company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address").value.trim() };
+    const id = b.getAttribute("data-id");
+    if(id){ await updateDoc(doc(db,"customers",id), data); } else { await addDoc(collection(db,"customers"), {...data, createdAt:Date.now()}); }
+    ui.modal=null; render(); showToast(id?"Customer updated":"Customer added");
   } else if(act==="save-driver"){
     const dn = el("f-name").value.trim();
     if(!dn){ showToast("Enter a name"); return; }
-    await addDoc(collection(db,"drivers"), { name:dn, phone:el("f-phone").value.trim(), vehicle:el("f-vehicle").value.trim(), createdAt:Date.now() });
-    ui.modal=null; render(); showToast("Driver added");
+    const data = { name:dn, phone:el("f-phone").value.trim(), vehicle:el("f-vehicle").value.trim() };
+    const id = b.getAttribute("data-id");
+    if(id){ await updateDoc(doc(db,"drivers",id), data); } else { await addDoc(collection(db,"drivers"), {...data, createdAt:Date.now()}); }
+    ui.modal=null; render(); showToast(id?"Driver updated":"Driver added");
   } else if(act==="save-invoice"){
     const num = el("f-invnum").value.trim();
     const don = el("f-donum").value.trim();
     const cid = el("f-customer").value;
     const total = parseInt(el("f-total").value,10)||0;
+    const driverId = el("f-driver-new").value || null;
     if(!num || !cid){ showToast("Fill in invoice number and customer"); return; }
-    await addDoc(collection(db,"invoices"), {
+    const newInv = {
       invoiceNumber:num, doNumber:don, customerId:cid, totalItems:total, pendingItems:[],
-      status:"awaiting_dispatch", driverId:null, notes:el("f-notes").value.trim(),
-      createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name
-    });
+      status:"ordered", driverId, notes:el("f-notes").value.trim(),
+      createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name, createdByRole:profile.role
+    };
+    newInv.history = [histLine("Invoice created")];
+    await addDoc(collection(db,"invoices"), newInv);
     ui.modal=null; render(); showToast("Invoice created");
   } else if(act==="save-user"){
     const name = el("f-name").value.trim();
+    const role = el("f-role").value;
+    const id = b.getAttribute("data-id");
+    const customerId = role==="customer" ? (el("f-customer-link").value||null) : null;
+    const driverId = role==="driver" ? (el("f-driver-link").value||null) : null;
+    if(!name){ showToast("Enter a name"); return; }
+    if(id){
+      await updateDoc(doc(db,"users",id), { name, role, customerId, driverId });
+      ui.modal=null; render(); showToast("User updated");
+      return;
+    }
     const email = el("f-email").value.trim();
     const password = el("f-password").value;
-    const role = el("f-role").value;
-    const customerId = role==="customer" ? (el("f-customer-link").value||null) : null;
-    if(!name || !email || password.length<6){ showToast("Fill in name, email and a 6+ character password"); return; }
+    if(!email || password.length<6){ showToast("Fill in email and a 6+ character password"); return; }
     try{
       const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
       const secondaryAuth = getAuth(secondary);
       const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
       const newUid = cred.user.uid;
       await signOut(secondaryAuth);
-      await setDoc(doc(db,"users",newUid), { name, email, role, customerId, createdAt:Date.now() });
+      await setDoc(doc(db,"users",newUid), { name, email, role, customerId, driverId, createdAt:Date.now() });
       ui.modal=null; render(); showToast("Login created for "+name);
     }catch(err){
       showToast("Could not create login \u2014 "+(err.code||"try again"));
@@ -611,7 +718,14 @@ async function modalClickHandler(e){
     const invId = b.getAttribute("data-inv");
     const inv = state.invoices.find(i=>i.id===invId);
     const cleanPending = ui.draftPending.items.filter(p=>p.itemNumber.trim()!=="");
-    const patch = { pendingItems:cleanPending, driverId: el("f-driver") ? (el("f-driver").value||null) : inv.driverId, updatedAt:Date.now() };
+    const newDriverId = el("f-driver") ? (el("f-driver").value||null) : inv.driverId;
+    let hist = inv.history||[];
+    if(newDriverId !== (inv.driverId||null)){
+      const dName = newDriverId ? (driverById(newDriverId)||{}).name : "none";
+      hist = withHist({history:hist}, "Driver set to "+dName);
+    }
+    hist = withHist({history:hist}, "Pending items updated ("+cleanPending.length+" pending)");
+    const patch = { pendingItems:cleanPending, driverId:newDriverId, updatedAt:Date.now(), history:hist };
     if(profile.role==="admin"){
       patch.invoiceNumber = el("f-invnum-e").value.trim();
       patch.doNumber = el("f-donum-e").value.trim();
@@ -620,10 +734,13 @@ async function modalClickHandler(e){
     }
     await updateDoc(doc(db,"invoices",invId), patch);
     ui.modal=null; ui.draftPending=null; render(); showToast("Saved");
-  } else if(act==="set-status"){
+  } else if(act==="set-status" || act==="override-status"){
     syncPendingFromInputs();
     const invId2 = b.getAttribute("data-inv");
-    await updateDoc(doc(db,"invoices",invId2), { status:b.getAttribute("data-status"), updatedAt:Date.now() });
+    const inv2 = state.invoices.find(i=>i.id===invId2);
+    const newStatus = act==="override-status" ? el("f-status-override").value : b.getAttribute("data-status");
+    const hist = withHist(inv2, "Status set to "+STATUS_LABEL[newStatus]);
+    await updateDoc(doc(db,"invoices",invId2), { status:newStatus, updatedAt:Date.now(), history:hist });
     ui.modal=null; ui.draftPending=null; render(); showToast("Status updated");
   } else if(act==="delete-invoice"){
     if(confirm("Delete this invoice? This cannot be undone.")){
@@ -631,8 +748,8 @@ async function modalClickHandler(e){
       ui.modal=null; render(); showToast("Invoice deleted");
     }
   } else if(act==="copy-message"){
-    const inv2 = state.invoices.find(i=>i.id===b.getAttribute("data-inv"));
-    const msg = buildStatusMessage(inv2);
+    const inv3 = state.invoices.find(i=>i.id===b.getAttribute("data-inv"));
+    const msg = buildStatusMessage(inv3);
     if(navigator.clipboard) navigator.clipboard.writeText(msg).then(()=>showToast("Message copied"));
   }
 }
@@ -651,9 +768,19 @@ function syncPendingFromInputs(){
 async function fulfillItem(invId, itemId){
   const inv = state.invoices.find(i=>i.id===invId);
   if(!inv) return;
+  const target = (inv.pendingItems||[]).find(p=>p.id===itemId);
   const items = (inv.pendingItems||[]).map(p=> p.id===itemId ? {...p, fulfilled:true, fulfilledAt:Date.now()} : p);
-  await updateDoc(doc(db,"invoices",invId), { pendingItems:items, updatedAt:Date.now() });
+  const hist = withHist(inv, "Marked item "+(target?target.itemNumber:"")+" available");
+  await updateDoc(doc(db,"invoices",invId), { pendingItems:items, updatedAt:Date.now(), history:hist });
   showToast("Ticked off");
+}
+
+async function driverMarkInTransit(invId){
+  const inv = state.invoices.find(i=>i.id===invId);
+  if(!inv) return;
+  const hist = withHist(inv, "Marked in transit by driver");
+  await updateDoc(doc(db,"invoices",invId), { status:"in_transit", updatedAt:Date.now(), history:hist });
+  showToast("Marked in transit");
 }
 
 render();
