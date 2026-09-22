@@ -1148,16 +1148,16 @@ function bindCustomerFilterPicker(searchId, resultsId, opts){
     if(term && !matches.length) html += `<span class="faint" style="display:block; padding:10px 12px;">No match</span>`;
     results.innerHTML = html;
     results.style.display = "block";
-    results.querySelectorAll("[data-pick]").forEach(btn=>{
-      btn.addEventListener("mousedown", (e)=>{
-        e.preventDefault();
-        e.stopPropagation();
-        results.style.display = "none";
-        opts.onSelect(btn.getAttribute("data-pick"));
-      });
-      btn.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); });
-    });
   }
+  results.addEventListener("mousedown", (e)=>{ e.preventDefault(); e.stopPropagation(); }, true);
+  results.addEventListener("click", (e)=>{
+    const btn = e.target.closest("[data-pick]");
+    if(!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    results.style.display = "none";
+    opts.onSelect(btn.getAttribute("data-pick"));
+  }, true);
   search.addEventListener("focus", ()=>showResults(search.value));
   search.addEventListener("input", ()=>showResults(search.value));
   search.addEventListener("blur", ()=>{ setTimeout(()=>{ results.style.display="none"; }, 150); });
@@ -1253,17 +1253,17 @@ function bindCustomerPicker(searchId, hiddenId, resultsId, emptyLabel){
     if(term && !matches.length) html += `<span class="faint" style="display:block; padding:10px 12px;">No match</span>`;
     results.innerHTML = html;
     results.style.display = "block";
-    results.querySelectorAll("[data-pick]").forEach(btn=>{
-      btn.addEventListener("mousedown", (e)=>{
-        e.preventDefault();
-        e.stopPropagation();
-        hidden.value = btn.getAttribute("data-pick");
-        search.value = btn.getAttribute("data-name")||"";
-        results.style.display = "none";
-      });
-      btn.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); });
-    });
   }
+  results.addEventListener("mousedown", (e)=>{ e.preventDefault(); e.stopPropagation(); }, true);
+  results.addEventListener("click", (e)=>{
+    const btn = e.target.closest("[data-pick]");
+    if(!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hidden.value = btn.getAttribute("data-pick");
+    search.value = btn.getAttribute("data-name")||"";
+    results.style.display = "none";
+  }, true);
   search.addEventListener("focus", ()=>showResults(search.value));
   search.addEventListener("input", ()=>showResults(search.value));
   search.addEventListener("blur", ()=>{ setTimeout(()=>{ results.style.display="none"; }, 150); });
