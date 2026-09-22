@@ -183,6 +183,8 @@ function mapUrlFor(site){
 function pendingOf(inv){ return (inv.pendingItems||[]).filter(p=>!p.fulfilled); }
 function waLink(phone, text){ const digits=String(phone||"").replace(/[^0-9]/g,""); return "https://wa.me/"+digits+"?text="+encodeURIComponent(text); }
 function byCreatedDesc(a,b){ return (b.createdAt||0)-(a.createdAt||0); }
+function slugifyUsername(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+function reverseStr(s){ return String(s||"").trim().split("").reverse().join(""); }
 function matchesSearch(inv, term){
   if(!term) return true;
   const t = term.toLowerCase();
@@ -289,7 +291,7 @@ function renderLogin(){
       <h1>Reality BM &middot; Delivery Control</h1>
       <p>Sign in with the account your admin created for you</p>
     </div>
-    <div class="field"><label>Email</label><input id="li-email" type="email" placeholder="name@company.com"></div>
+    <div class="field"><label>Email or username</label><input id="li-email" placeholder="name@company.com or your username"></div>
     <div class="field"><label>Password</label><input id="li-pass" type="password" placeholder="Password"></div>
     <button class="btn btn-primary" id="li-submit" style="width:100%;">Sign in</button>
     ${ui.loginError ? `<p class="err">${esc(ui.loginError)}</p>` : ""}
@@ -298,11 +300,19 @@ function renderLogin(){
 function bindLogin(){
   el("li-submit").addEventListener("click", async ()=>{
     ui.loginError = "";
-    const email = el("li-email").value.trim();
+    const raw = el("li-email").value.trim();
     const pass = el("li-pass").value;
-    if(!email || !pass){ ui.loginError="Enter your email and password."; render(); return; }
+    if(!raw || !pass){ ui.loginError="Enter your email/username and password."; render(); return; }
+    let email = raw;
+    if(raw.indexOf("@")===-1){
+      try{
+        const lookup = await getDoc(doc(db,"usernames",slugifyUsername(raw)));
+        if(!lookup.exists()){ ui.loginError="No account found for that username."; render(); return; }
+        email = lookup.data().email;
+      }catch(e){ ui.loginError="Could not look up that username. Try again."; render(); return; }
+    }
     try{ await signInWithEmailAndPassword(auth, email, pass); }
-    catch(e){ ui.loginError = "Could not sign in. Check your email and password."; render(); }
+    catch(e){ ui.loginError = "Could not sign in. Check your details."; render(); }
   });
 }
 
@@ -469,7 +479,7 @@ function viewCustomers(){
   const body = !list.length ? `<div class="empty">No customers match.</div>` :
     `<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
     list.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
-      <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-customer" data-id="${c.id}">Edit</button>
+      <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="open-customer" data-id="${c.id}">Open</button>
       ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
   return pageHead("Customers","People and companies you deliver to", `<div style="display:flex; gap:8px; flex-wrap:wrap;">${searchBox("customers-search", ui.customersSearch, "Search name, company or phone")}<button class="btn btn-primary" data-act="new-customer">Add customer</button></div>`) + `<div class="card">${body}</div>`;
 }
@@ -594,8 +604,9 @@ function renderModal(){
   if(m.type==="new-invoice") inner = newInvoiceForm();
   if(m.type==="new-user") inner = userForm(null);
   if(m.type==="edit-user") inner = userForm(state.users.find(u=>u.id===m.id));
-  if(m.type==="new-site") inner = siteForm(null);
-  if(m.type==="edit-site") inner = siteForm(siteById(m.id));
+  if(m.type==="new-site") inner = siteForm(null, m.forCustomerId||null, m.returnTo||null);
+  if(m.type==="edit-site") inner = siteForm(siteById(m.id), null, m.returnTo||null);
+  if(m.type==="customer-detail") inner = customerDetailView(m.id);
   if(m.type==="open-invoice") inner = invoiceDetail(m.id);
   if(m.type==="followup") inner = followupForm(m.invId, m.itemId);
   return `<div class="modal-bg" data-act="close-modal-bg"><div class="modal">${inner}</div></div>`;
@@ -662,16 +673,20 @@ function userForm(u){
     </div>`;
 }
 
-function siteForm(s){
-  const custOptions = state.customers.map(c=>`<option value="${c.id}" ${s&&s.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("");
+function siteForm(s, lockCustomerId, returnTo){
+  const lockedId = lockCustomerId || (s ? s.customerId : null);
+  const lockedCust = lockedId ? customerById(lockedId) : null;
+  const custField = lockedCust
+    ? `<input type="hidden" id="f-customer" value="${lockedCust.id}"><div class="field"><label>Customer</label><input value="${esc(lockedCust.name)}" disabled></div>`
+    : `<div class="field"><label>Customer</label><select id="f-customer">${state.customers.map(c=>`<option value="${c.id}" ${s&&s.customerId===c.id?"selected":""}>${esc(c.name)}${c.company?" \u2014 "+esc(c.company):""}</option>`).join("")}</select></div>`;
   return `<h2>${s?"Edit site":"Add site"}</h2>
-    <div class="field"><label>Customer</label><select id="f-customer">${custOptions}</select></div>
+    ${custField}
     <div class="field"><label>Site name</label><input id="f-sitename" value="${s?esc(s.siteName):""}" placeholder="e.g. Villa 12, Al Barsha site"></div>
     <div class="field"><label>Address</label><input id="f-address" value="${s?esc(s.address||""):""}" placeholder="Street / area / emirate"></div>
     <div class="field"><label>Google Maps link</label><input id="f-maplink" value="${s?esc(s.mapLink||""):""}" placeholder="Paste a Google Maps share link"></div>
     <div class="field"><label>Site supervisor / receiver name</label><input id="f-supname" value="${s?esc(s.supervisorName||""):""}" placeholder="Who receives the delivery on site"></div>
     <div class="field"><label>Their phone</label><input id="f-supphone" value="${s?esc(s.supervisorPhone||""):""}" placeholder="+9715xxxxxxxx"></div>
-    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-site" data-id="${s?s.id:""}">${s?"Save changes":"Add site"}</button></div>`;
+    <div class="modal-actions"><button class="btn" data-act="close-modal" data-return="${returnTo||""}">Cancel</button><button class="btn btn-primary" data-act="save-site" data-id="${s?s.id:""}" data-return="${returnTo||""}">${s?"Save changes":"Add site"}</button></div>`;
 }
 
 
@@ -688,11 +703,62 @@ function followupForm(invId, itemId){
   }
   const driverOptions = state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
   return `<h2>Create delivery for item ${esc(item.itemNumber)}</h2>
-    <p class="faint" style="margin-bottom:16px;">Restocked from ${esc(inv.invoiceNumber)} \u2014 ${esc(cust?cust.name:"\u2014")}${site?" \u00b7 "+esc(site.siteName):""}${item.note?" \u2014 "+esc(item.note):""}</p>
-    <div class="field"><label>New invoice number</label><input id="f-fu-invnum" placeholder="e.g. INV-4030"></div>
-    <div class="field"><label>New DO number</label><input id="f-fu-donum" placeholder="e.g. DO-1195"></div>
-    <div class="field"><label>Driver</label><select id="f-fu-driver"><option value="">Select a driver</option>${driverOptions}</select></div>
+    <p class="faint" style="margin-bottom:16px;">Same invoice and DO as the original \u2014 just needs a driver for this trip.</p>
+    <div class="card" style="margin-bottom:14px; padding:12px 14px;">
+      <p><b>${esc(inv.invoiceNumber)}</b> &middot; DO ${esc(inv.doNumber||"\u2014")}</p>
+      <p class="faint" style="margin-top:4px;">${esc(cust?cust.name:"\u2014")}${site?" \u00b7 "+esc(site.siteName):""}</p>
+      <p style="margin-top:8px;">Item ${esc(item.itemNumber)}${item.note?" \u2014 "+esc(item.note):""}</p>
+    </div>
+    <div class="field"><label>Driver for this delivery</label><select id="f-fu-driver"><option value="">Select a driver</option>${driverOptions}</select></div>
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-followup" data-inv="${invId}" data-item="${itemId}">Create delivery</button></div>`;
+}
+
+function customerDetailView(id){
+  const c = customerById(id);
+  if(!c) return `<p>Not found.</p><div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
+  const sites = sitesOfCustomer(id);
+  const linkedUser = state.users.find(u=>u.customerId===id && u.role==="customer");
+
+  const sitesHtml = !sites.length ? `<p class="faint">No sites saved for this customer yet.</p>` :
+    sites.map(s=>`<div class="itemline" style="align-items:flex-start;">
+      <span class="name"><b>${esc(s.siteName)}</b>${s.address?`<br><span class="faint">${esc(s.address)}</span>`:""}${s.supervisorName?`<br><span class="faint">Contact: ${esc(s.supervisorName)}${s.supervisorPhone?" \u00b7 "+esc(s.supervisorPhone):""}</span>`:""}</span>
+      <span style="white-space:nowrap;"><button class="btn btn-sm" data-act="edit-site" data-id="${s.id}" data-return="${id}">Edit</button> <button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button></span>
+    </div>`).join("");
+
+  let loginHtml;
+  if(linkedUser){
+    loginHtml = `<p><b>Username:</b> ${esc(linkedUser.loginUsername||linkedUser.email||"\u2014")}</p>` +
+      (c.loginPasswordHint ? `<p style="margin-top:4px;"><b>Password:</b> ${esc(c.loginPasswordHint)} <span class="faint">(company name reversed, set when the login was created)</span></p>` : "") +
+      (linkedUser.email && linkedUser.email.indexOf("@customer.")===-1 ? `<button class="btn btn-sm" style="margin-top:8px;" data-act="reset-password" data-email="${esc(linkedUser.email)}">Send password reset email</button>` : "");
+  } else {
+    const previewUser = c.name ? slugifyUsername(c.name) : "";
+    const previewPass = c.company ? reverseStr(c.company) : "";
+    loginHtml = `<p class="faint">No login yet. It will be created as:</p>
+      <p style="margin-top:4px;"><b>Username:</b> ${esc(previewUser)||"<i>needs a name</i>"} &middot; <b>Password:</b> ${esc(previewPass)||"<i>needs a company name, 6+ characters</i>"}</p>
+      <button class="btn btn-sm btn-primary" style="margin-top:8px;" data-act="create-customer-login" data-id="${id}">Create login</button>`;
+  }
+
+  return `<h2>${esc(c.name)}</h2>
+    <div class="field"><label>Name</label><input id="f-name" value="${esc(c.name)}"></div>
+    <div class="field"><label>Company</label><input id="f-company" value="${esc(c.company||"")}"></div>
+    <div class="field"><label>Phone (WhatsApp)</label><input id="f-phone" value="${esc(c.phone||"")}"></div>
+    <div class="field"><label>Address</label><input id="f-address-c" value="${esc(c.address||"")}"></div>
+    <div class="modal-actions" style="justify-content:flex-end;"><button class="btn btn-primary btn-sm" data-act="save-customer-detail" data-id="${id}">Save details</button></div>
+
+    <div style="border-top:1px solid var(--line); margin-top:16px; padding-top:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h3 style="font-size:14px;">Sites</h3>
+        <button class="btn btn-sm btn-ghost" data-act="new-site-for" data-id="${id}">+ Add site</button>
+      </div>
+      ${sitesHtml}
+    </div>
+
+    <div style="border-top:1px solid var(--line); margin-top:16px; padding-top:14px;">
+      <h3 style="font-size:14px; margin-bottom:8px;">Login</h3>
+      ${loginHtml}
+    </div>
+
+    <div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
 }
 
 function invoiceDetail(id){
@@ -837,6 +903,7 @@ function mainClickHandler(e){
   if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
   else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
+  else if(act==="open-customer"){ ui.modal={type:"customer-detail", id:b.getAttribute("data-id")}; render(); }
   else if(act==="new-driver"){ ui.modal={type:"new-driver"}; render(); }
   else if(act==="edit-driver"){ ui.modal={type:"edit-driver", id:b.getAttribute("data-id")}; render(); }
   else if(act==="new-user"){ ui.modal={type:"new-user"}; render(); }
@@ -855,7 +922,22 @@ async function modalClickHandler(e){
   const b = e.target.closest("[data-act]");
   if(!b) return;
   const act = b.getAttribute("data-act");
-  if(act==="close-modal"){ ui.modal=null; ui.draftPending=null; render(); }
+  if(act==="close-modal"){ const ret=b.getAttribute("data-return"); ui.modal = ret ? {type:"customer-detail", id:ret} : null; ui.draftPending=null; render(); }
+  else if(act==="new-site-for"){ ui.modal={type:"new-site", forCustomerId:b.getAttribute("data-id"), returnTo:b.getAttribute("data-id")}; render(); }
+  else if(act==="edit-site"){ ui.modal={type:"edit-site", id:b.getAttribute("data-id"), returnTo:b.getAttribute("data-return")||null}; render(); }
+  else if(act==="del-site"){ if(confirm("Remove this site?")) await deleteDoc(doc(db,"sites",b.getAttribute("data-id"))); }
+  else if(act==="save-customer-detail"){
+    const id = b.getAttribute("data-id");
+    const name = el("f-name").value.trim();
+    if(!name){ showToast("Enter a name"); return; }
+    await updateDoc(doc(db,"customers",id), { name, company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address-c").value.trim() });
+    showToast("Saved");
+    render();
+  }
+  else if(act==="create-customer-login"){
+    const id = b.getAttribute("data-id");
+    await createCustomerLogin(id);
+  }
   else if(act==="save-customer"){
     const name = el("f-name").value.trim();
     if(!name){ showToast("Enter a name"); return; }
@@ -925,7 +1007,9 @@ async function modalClickHandler(e){
     };
     const id = b.getAttribute("data-id");
     if(id){ await updateDoc(doc(db,"sites",id), data); } else { await addDoc(collection(db,"sites"), {...data, createdAt:Date.now(), createdByName:profile.name}); }
-    ui.modal=null; render(); showToast(id?"Site updated":"Site added");
+    const ret = b.getAttribute("data-return");
+    ui.modal = ret ? {type:"customer-detail", id:ret} : null;
+    render(); showToast(id?"Site updated":"Site added");
   } else if(act==="reset-password"){
     const email = b.getAttribute("data-email");
     try{ await sendPasswordResetEmail(auth, email); showToast("Reset email sent to "+email); }
@@ -974,11 +1058,9 @@ async function modalClickHandler(e){
   } else if(act==="save-followup"){
     const invId = b.getAttribute("data-inv");
     const itemId = b.getAttribute("data-item");
-    const newNum = el("f-fu-invnum").value.trim();
-    const newDo = el("f-fu-donum").value.trim();
     const driverId = el("f-fu-driver").value;
-    if(!newNum || !driverId){ showToast("Enter an invoice number and pick a driver"); return; }
-    await createFollowUpDelivery(invId, itemId, newNum, newDo, driverId);
+    if(!driverId){ showToast("Pick a driver for this delivery"); return; }
+    await createFollowUpDelivery(invId, itemId, driverId);
     ui.modal=null; render(); showToast("Delivery created");
   } else if(act==="copy-message"){
     const inv3 = state.invoices.find(i=>i.id===b.getAttribute("data-inv"));
@@ -998,23 +1080,22 @@ function syncPendingFromInputs(){
   });
 }
 
-async function createFollowUpDelivery(invId, itemId, newInvoiceNumber, newDoNumber, driverId){
+async function createFollowUpDelivery(invId, itemId, driverId){
   const inv = state.invoices.find(i=>i.id===invId);
   if(!inv) return;
   const target = (inv.pendingItems||[]).find(p=>p.id===itemId);
   if(!target) return;
-  const cust = customerById(inv.customerId);
   const newInv = {
-    invoiceNumber: newInvoiceNumber, doNumber: newDoNumber||"", customerId: inv.customerId, siteId: inv.siteId||null,
+    invoiceNumber: inv.invoiceNumber, doNumber: inv.doNumber||"", customerId: inv.customerId, siteId: inv.siteId||null,
     totalItems: 1, pendingItems: [], status: "ordered", driverId: driverId,
-    notes: "Follow-up delivery for "+inv.invoiceNumber+" \u2014 item "+target.itemNumber+(target.note?": "+target.note:""),
+    notes: "Follow-up delivery for item "+target.itemNumber+(target.note?": "+target.note:"")+(inv.notes?" \u2014 "+inv.notes:""),
     createdAt: Date.now(), createdByUid: profile.uid, createdByName: profile.name, createdByRole: profile.role
   };
-  newInv.history = [histLine("Created as follow-up for "+inv.invoiceNumber+", item "+target.itemNumber)];
-  await addDoc(collection(db,"invoices"), newInv);
+  newInv.history = [histLine("Created as follow-up for item "+target.itemNumber+" (same invoice/DO as "+inv.invoiceNumber+")")];
+  const newRef = await addDoc(collection(db,"invoices"), newInv);
 
   const items = (inv.pendingItems||[]).map(p=> p.id===itemId ? {...p, fulfilled:true, fulfilledAt:Date.now()} : p);
-  const hist = withHist(inv, "Item "+target.itemNumber+" ticked off \u2014 new delivery "+newInvoiceNumber+" created");
+  const hist = withHist(inv, "Item "+target.itemNumber+" ticked off \u2014 follow-up delivery created ("+newRef.id.slice(0,6)+")");
   await updateDoc(doc(db,"invoices",invId), { pendingItems:items, updatedAt:Date.now(), history:hist });
 }
 
@@ -1032,6 +1113,41 @@ async function driverMarkDelivered(invId){
   const hist = withHist(inv, "Marked delivered by driver");
   await updateDoc(doc(db,"invoices",invId), { status:"delivered", updatedAt:Date.now(), history:hist });
   showToast("Marked delivered");
+}
+
+async function createCustomerLogin(customerId){
+  const c = customerById(customerId);
+  if(!c) return;
+  if(!c.name){ showToast("Add a name first"); return; }
+  if(!c.company || reverseStr(c.company).length < 6){ showToast("Add a company name (6+ characters) to generate a password"); return; }
+  const base = slugifyUsername(c.name);
+  if(!base){ showToast("Name must contain letters or numbers"); return; }
+  let username = base;
+  let n = 1;
+  while(true){
+    let existing;
+    try{ existing = await getDoc(doc(db,"usernames",username)); }
+    catch(err){ showToast("Could not check username availability"); return; }
+    if(!existing.exists()) break;
+    n++; username = base + n;
+    if(n>50){ showToast("Could not find a free username"); return; }
+  }
+  const password = reverseStr(c.company);
+  const email = username + "@customer.rbmdeliverysystem.local";
+  try{
+    const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
+    const secondaryAuth = getAuth(secondary);
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    const newUid = cred.user.uid;
+    await signOut(secondaryAuth);
+    await setDoc(doc(db,"users",newUid), { name:c.name, email, role:"customer", customerId, driverId:null, loginUsername:username, createdAt:Date.now() });
+    await setDoc(doc(db,"usernames",username), { email, customerId, createdAt:Date.now() });
+    await updateDoc(doc(db,"customers",customerId), { loginUsername:username, loginPasswordHint:password });
+    showToast("Login created \u2014 username: "+username);
+    render();
+  }catch(err){
+    showToast("Could not create login \u2014 "+(err.code||"try again"));
+  }
 }
 
 render();
