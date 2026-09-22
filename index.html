@@ -440,9 +440,8 @@ function invoicesTable(list){
 }
 
 function viewInvoicesAdmin(){
-  const isCounter = profile.role==="counter";
   const filtered = state.invoices.filter(i=>matchesSearch(i, ui.invoicesSearch) && (!ui.invoicesStatus || i.status===ui.invoicesStatus)).sort(byCreatedDesc);
-  return pageHead("Invoices", isCounter?"Create an invoice from the physical copy, or correct an existing one":"Warehouse or counter creates these \u2014 you can correct or remove a mistaken entry", isCounter?`<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`:"") +
+  return pageHead("Invoices", "Create an invoice from the physical copy, or correct/remove a mistaken one", `<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`) +
     `<div class="card"><div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">${searchBox("invoices-search", ui.invoicesSearch, "Search invoice #, DO #, or customer")}${statusFilterHtml("invoices-status", ui.invoicesStatus)}</div>${invoicesTable(filtered)}</div>`;
 }
 function viewQueueWarehouse(){
