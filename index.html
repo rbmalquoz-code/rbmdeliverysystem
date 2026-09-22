@@ -115,7 +115,7 @@ import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot
+  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot, query, where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ============================================================
@@ -200,10 +200,16 @@ onAuthStateChanged(auth, async (user) => {
 function cleanupListeners(){ unsubs.forEach(u=>u&&u()); unsubs=[]; }
 
 function startListeners(){
-  unsubs.push(onSnapshot(collection(db,"customers"), snap=>{ state.customers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   unsubs.push(onSnapshot(collection(db,"drivers"), snap=>{ state.drivers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
-  unsubs.push(onSnapshot(collection(db,"invoices"), snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
-  if(profile && profile.role==="admin"){
+
+  if(profile.role==="customer"){
+    const invQ = query(collection(db,"invoices"), where("customerId","==",profile.customerId));
+    unsubs.push(onSnapshot(invQ, snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  } else {
+    unsubs.push(onSnapshot(collection(db,"customers"), snap=>{ state.customers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+    unsubs.push(onSnapshot(collection(db,"invoices"), snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  }
+  if(profile.role==="admin"){
     unsubs.push(onSnapshot(collection(db,"users"), snap=>{ state.users = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
   render();
@@ -558,12 +564,12 @@ async function modalClickHandler(e){
     const name = el("f-name").value.trim();
     if(!name){ showToast("Enter a name"); return; }
     await addDoc(collection(db,"customers"), { name, company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address").value.trim(), createdAt:Date.now() });
-    ui.modal=null; showToast("Customer added");
+    ui.modal=null; render(); showToast("Customer added");
   } else if(act==="save-driver"){
     const dn = el("f-name").value.trim();
     if(!dn){ showToast("Enter a name"); return; }
     await addDoc(collection(db,"drivers"), { name:dn, phone:el("f-phone").value.trim(), vehicle:el("f-vehicle").value.trim(), createdAt:Date.now() });
-    ui.modal=null; showToast("Driver added");
+    ui.modal=null; render(); showToast("Driver added");
   } else if(act==="save-invoice"){
     const num = el("f-invnum").value.trim();
     const don = el("f-donum").value.trim();
@@ -575,7 +581,7 @@ async function modalClickHandler(e){
       status:"awaiting_dispatch", driverId:null, notes:el("f-notes").value.trim(),
       createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name
     });
-    ui.modal=null; showToast("Invoice created");
+    ui.modal=null; render(); showToast("Invoice created");
   } else if(act==="save-user"){
     const name = el("f-name").value.trim();
     const email = el("f-email").value.trim();
@@ -590,7 +596,7 @@ async function modalClickHandler(e){
       const newUid = cred.user.uid;
       await signOut(secondaryAuth);
       await setDoc(doc(db,"users",newUid), { name, email, role, customerId, createdAt:Date.now() });
-      ui.modal=null; showToast("Login created for "+name);
+      ui.modal=null; render(); showToast("Login created for "+name);
     }catch(err){
       showToast("Could not create login \u2014 "+(err.code||"try again"));
     }
@@ -613,16 +619,16 @@ async function modalClickHandler(e){
       patch.totalItems = parseInt(el("f-total-e").value,10)||0;
     }
     await updateDoc(doc(db,"invoices",invId), patch);
-    ui.modal=null; ui.draftPending=null; showToast("Saved");
+    ui.modal=null; ui.draftPending=null; render(); showToast("Saved");
   } else if(act==="set-status"){
     syncPendingFromInputs();
     const invId2 = b.getAttribute("data-inv");
     await updateDoc(doc(db,"invoices",invId2), { status:b.getAttribute("data-status"), updatedAt:Date.now() });
-    ui.modal=null; ui.draftPending=null; showToast("Status updated");
+    ui.modal=null; ui.draftPending=null; render(); showToast("Status updated");
   } else if(act==="delete-invoice"){
     if(confirm("Delete this invoice? This cannot be undone.")){
       await deleteDoc(doc(db,"invoices",b.getAttribute("data-inv")));
-      ui.modal=null; showToast("Invoice deleted");
+      ui.modal=null; render(); showToast("Invoice deleted");
     }
   } else if(act==="copy-message"){
     const inv2 = state.invoices.find(i=>i.id===b.getAttribute("data-inv"));
