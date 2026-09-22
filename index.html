@@ -126,7 +126,7 @@ tr:last-child td{border-bottom:none;}
 <script type="module">
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot, query, where
@@ -219,7 +219,7 @@ function cleanupListeners(){ unsubs.forEach(u=>u&&u()); unsubs=[]; }
 function startListeners(){
   const role = profile.role;
 
-  if(role==="admin" || role==="warehouse" || role==="driver"){
+  if(role==="admin" || role==="counter" || role==="warehouse" || role==="driver"){
     unsubs.push(onSnapshot(collection(db,"customers"), snap=>{ state.customers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
   unsubs.push(onSnapshot(collection(db,"drivers"), snap=>{ state.drivers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
@@ -240,7 +240,7 @@ function startListeners(){
   } else {
     unsubs.push(onSnapshot(collection(db,"invoices"), snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
-  if(role==="admin"){
+  if(role==="admin" || role==="counter"){
     unsubs.push(onSnapshot(collection(db,"users"), snap=>{ state.users = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
   render();
@@ -282,7 +282,7 @@ function bindLogin(){
 /* ---------------- shell ---------------- */
 
 function navItemsFor(role){
-  if(role==="admin") return [["live","Live dashboard"],["overview","Overview"],["pendingorders","Pending orders"],["invoices","Invoices"],["pending","Pending items"],["sites","Site locations"],["customers","Customers"],["drivers","Drivers"],["users","Users & roles"]];
+  if(role==="admin" || role==="counter") return [["live","Live dashboard"],["overview","Overview"],["pendingorders","Pending orders"],["invoices","Invoices"],["pending","Pending items"],["sites","Site locations"],["customers","Customers"],["drivers","Drivers"],["users","Users & roles"]];
   if(role==="warehouse") return [["queue","Invoices"],["pendingorders","Pending orders"],["pending","Pending items"],["sites","Site locations"]];
   if(role==="driver") return [["mydeliveries","My deliveries"],["sites","Site locations"]];
   return [["myorders","My orders"],["sites","My sites"]];
@@ -293,7 +293,7 @@ function renderShell(){
   const items = navItemsFor(role);
   if(!ui.view || !items.some(n=>n[0]===ui.view)) ui.view = items[0][0];
   const navHtml = items.map(n=>`<button class="${ui.view===n[0]?"active":""}" data-nav="${n[0]}">${n[1]}</button>`).join("");
-  const roleLabel = role==="admin"?"Admin":role==="warehouse"?"Warehouse":role==="driver"?"Driver":"Customer";
+  const roleLabel = role==="admin"?"Admin":role==="counter"?"Counter":role==="warehouse"?"Warehouse":role==="driver"?"Driver":"Customer";
   return `<div class="sidebar">
       <div class="brand"><div class="mark">RB</div><h1>Reality BM</h1><p>Delivery Control</p></div>
       <nav class="nav">${navHtml}</nav>
@@ -309,7 +309,7 @@ function renderShell(){
 
 function renderView(){
   const role = profile.role;
-  if(role==="admin"){
+  if(role==="admin" || role==="counter"){
     if(ui.view==="live") return viewLive();
     if(ui.view==="overview") return viewOverview();
     if(ui.view==="pendingorders") return viewPendingOrders();
@@ -390,7 +390,8 @@ function invoicesTable(list){
 }
 
 function viewInvoicesAdmin(){
-  return pageHead("Invoices","Warehouse creates these \u2014 you can correct or remove a mistaken entry") +
+  const isCounter = profile.role==="counter";
+  return pageHead("Invoices", isCounter?"Create an invoice from the physical copy, or correct an existing one":"Warehouse or counter creates these \u2014 you can correct or remove a mistaken entry", isCounter?`<button class="btn btn-primary" data-act="new-invoice">New invoice</button>`:"") +
     `<div class="card">${invoicesTable(state.invoices.slice().sort(byCreatedDesc))}</div>`;
 }
 function viewQueueWarehouse(){
@@ -422,33 +423,36 @@ function viewPending(){
 /* ---------------- customers / drivers (admin) ---------------- */
 
 function viewCustomers(){
+  const isAdmin = profile.role==="admin";
   const list = state.customers;
   const body = !list.length ? `<div class="empty">No customers yet.</div>` :
     `<table><thead><tr><th>Name</th><th>Company</th><th>Phone</th><th>Address</th><th></th></tr></thead><tbody>` +
     list.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.company||"\u2014")}</td><td>${esc(c.phone||"\u2014")}</td><td class="faint">${esc(c.address||"\u2014")}</td>
       <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-customer" data-id="${c.id}">Edit</button>
-      <button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
+      ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-customer" data-id="${c.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
   return pageHead("Customers","People and companies you deliver to", `<button class="btn btn-primary" data-act="new-customer">Add customer</button>`) + `<div class="card">${body}</div>`;
 }
 function viewDrivers(){
+  const isAdmin = profile.role==="admin";
   const list = state.drivers;
   const body = !list.length ? `<div class="empty">No drivers yet.</div>` :
     `<table><thead><tr><th>Name</th><th>Phone</th><th>Vehicle</th><th></th></tr></thead><tbody>` +
     list.map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.phone||"\u2014")}</td><td class="faint">${esc(d.vehicle||"\u2014")}</td>
       <td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-driver" data-id="${d.id}">Edit</button>
-      <button class="btn btn-sm btn-danger" data-act="del-driver" data-id="${d.id}">Remove</button></td></tr>`).join("") + `</tbody></table>`;
+      ${isAdmin?`<button class="btn btn-sm btn-danger" data-act="del-driver" data-id="${d.id}">Remove</button>`:""}</td></tr>`).join("") + `</tbody></table>`;
   return pageHead("Truck drivers","Drivers you can assign to a delivery, and link to a driver login", `<button class="btn btn-primary" data-act="new-driver">Add driver</button>`) + `<div class="card">${body}</div>`;
 }
 
 /* ---------------- sites (visible to every role) ---------------- */
 
 function viewSites(){
-  const canManage = profile.role==="admin" || profile.role==="warehouse";
+  const canEdit = profile.role==="admin" || profile.role==="counter" || profile.role==="warehouse";
+  const canDelete = profile.role==="admin";
   const list = state.sites.slice().sort((a,b)=>(a.siteName||"").localeCompare(b.siteName||""));
-  if(!list.length) return pageHead("Site locations","Delivery sites with their location and on-site contact", canManage ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
+  if(!list.length) return pageHead("Site locations","Delivery sites with their location and on-site contact", canEdit ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
     `<div class="empty">No sites saved yet.</div>`;
   const showCustomerCol = profile.role!=="customer";
-  const body = `<table><thead><tr>${showCustomerCol?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${canManage?"<th></th>":""}</tr></thead><tbody>` +
+  const body = `<table><thead><tr>${showCustomerCol?"<th>Customer</th>":""}<th>Site</th><th>Address</th><th>Supervisor / receiver</th><th>Location</th>${(canEdit||canDelete)?"<th></th>":""}</tr></thead><tbody>` +
     list.map(s=>{
       const cust = customerById(s.customerId);
       return `<tr>
@@ -457,10 +461,10 @@ function viewSites(){
         <td class="faint">${esc(s.address||"\u2014")}</td>
         <td>${esc(s.supervisorName||"\u2014")}${s.supervisorPhone?`<br><span class="faint">${esc(s.supervisorPhone)}</span>`:""}</td>
         <td>${mapUrlFor(s)?`<a href="${esc(mapUrlFor(s))}" target="_blank" rel="noopener" class="btn btn-sm">Open map</a>`:'<span class="faint">\u2014</span>'}</td>
-        ${canManage?`<td style="text-align:right; white-space:nowrap;"><button class="btn btn-sm" data-act="edit-site" data-id="${s.id}">Edit</button> <button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button></td>`:""}
+        ${(canEdit||canDelete)?`<td style="text-align:right; white-space:nowrap;">${canEdit?`<button class="btn btn-sm" data-act="edit-site" data-id="${s.id}">Edit</button>`:""} ${canDelete?`<button class="btn btn-sm btn-danger" data-act="del-site" data-id="${s.id}">Remove</button>`:""}</td>`:""}
       </tr>`;
     }).join("") + `</tbody></table>`;
-  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", canManage ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
+  return pageHead(profile.role==="customer"?"My sites":"Site locations","Delivery sites with their location and on-site contact", canEdit ? `<button class="btn btn-primary" data-act="new-site">Add site</button>` : "") +
     `<div class="card">${body}</div>`;
 }
 
@@ -598,13 +602,17 @@ function userForm(u){
     <div class="field"><label>Temporary password</label><input id="f-password" type="text" placeholder="At least 6 characters"></div>`}
     <div class="field"><label>Role</label><select id="f-role">
       <option value="warehouse" ${role==="warehouse"?"selected":""}>Warehouse</option>
+      <option value="counter" ${role==="counter"?"selected":""}>Counter</option>
       <option value="driver" ${role==="driver"?"selected":""}>Driver</option>
       <option value="customer" ${role==="customer"?"selected":""}>Customer</option>
       <option value="admin" ${role==="admin"?"selected":""}>Admin</option>
     </select></div>
     <div class="field" id="f-customer-wrap"><label>Linked customer</label><select id="f-customer-link"><option value="">\u2014</option>${custOptions}</select></div>
     <div class="field" id="f-driver-wrap"><label>Linked driver</label><select id="f-driver-link"><option value="">\u2014</option>${drvOptions}</select></div>
-    <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-user" data-id="${u?u.id:""}">${u?"Save changes":"Create login"}</button></div>`;
+    <div class="modal-actions" style="justify-content:space-between;">
+      ${u && u.email ? `<button class="btn btn-sm" data-act="reset-password" data-email="${esc(u.email)}">Send password reset email</button>` : `<span></span>`}
+      <div style="display:flex; gap:8px;"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-user" data-id="${u?u.id:""}">${u?"Save changes":"Create login"}</button></div>
+    </div>`;
 }
 
 function siteForm(s){
@@ -625,7 +633,9 @@ function invoiceDetail(id){
   if(!inv) return `<p>Not found.</p><div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
   const cust = customerById(inv.customerId);
   const isAdmin = profile.role==="admin";
+  const isCounter = profile.role==="counter";
   const isWarehouse = profile.role==="warehouse";
+  const isFullEditor = isAdmin || isCounter;
   if(!ui.draftPending || ui.draftPending.invId!==id) ui.draftPending = { invId:id, items:(inv.pendingItems||[]).map(p=>({...p})) };
   const driverOptions = `<option value="">No driver assigned</option>` + state.drivers.map(d=>`<option value="${d.id}" ${inv.driverId===d.id?"selected":""}>${esc(d.name)}</option>`).join("");
 
@@ -639,7 +649,7 @@ function invoiceDetail(id){
   let body = `<h2>${esc(inv.invoiceNumber)}</h2>
     <p class="faint" style="margin-bottom:16px;">DO ${esc(inv.doNumber||"\u2014")} &middot; ${esc(cust?cust.name:"\u2014")} &middot; <span class="pill ${STATUS_PILL[inv.status]}">${STATUS_LABEL[inv.status]}</span></p>`;
 
-  if(isAdmin){
+  if(isFullEditor){
     const custOptions = state.customers.map(c=>`<option value="${c.id}" ${c.id===inv.customerId?"selected":""}>${esc(c.name)}</option>`).join("");
     body += `<div class="field"><label>Invoice number</label><input id="f-invnum-e" value="${esc(inv.invoiceNumber)}"></div>
       <div class="field"><label>DO number</label><input id="f-donum-e" value="${esc(inv.doNumber||"")}"></div>
@@ -660,7 +670,7 @@ function invoiceDetail(id){
   }
 
 
-  if(isAdmin || isWarehouse){
+  if(isFullEditor || isWarehouse){
     const nextKey = NEXT_STATUS[inv.status];
     body += `<h3 style="font-size:14px; margin-bottom:8px;">Pending items (not available)</h3>${pendingRows}
       <button class="btn btn-sm btn-ghost" data-act="add-pending-row" style="margin-bottom:14px;">+ Add pending item</button>
@@ -668,7 +678,7 @@ function invoiceDetail(id){
       <div class="modal-actions" style="justify-content:space-between;">
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           ${nextKey ? `<button class="btn btn-sm" data-act="set-status" data-status="${nextKey}" data-inv="${inv.id}">${NEXT_LABEL[inv.status]}</button>` : ""}
-          ${isAdmin ? `<select id="f-status-override" style="width:auto; display:inline-block;">${STATUS_ORDER.map(s=>`<option value="${s}" ${s===inv.status?"selected":""}>${STATUS_LABEL[s]}</option>`).join("")}</select>
+          ${isFullEditor ? `<select id="f-status-override" style="width:auto; display:inline-block;">${STATUS_ORDER.map(s=>`<option value="${s}" ${s===inv.status?"selected":""}>${STATUS_LABEL[s]}</option>`).join("")}</select>
           <button class="btn btn-sm" data-act="override-status" data-inv="${inv.id}">Set status</button>` : ""}
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -684,7 +694,7 @@ function invoiceDetail(id){
     body += `<div class="modal-actions"><button class="btn" data-act="close-modal">Close</button></div>`;
   }
 
-  if((isAdmin||isWarehouse) && cust && cust.phone){
+  if((isFullEditor||isWarehouse) && cust && cust.phone){
     body += `<div style="border-top:1px solid var(--line); margin-top:16px; padding-top:14px;">
       <a class="btn btn-sm" href="${waLink(cust.phone, buildStatusMessage(inv))}" target="_blank" rel="noopener">Share WhatsApp update</a>
       <button class="btn btn-sm btn-ghost" data-act="copy-message" data-inv="${inv.id}">Copy message</button>
@@ -820,6 +830,10 @@ async function modalClickHandler(e){
     const id = b.getAttribute("data-id");
     if(id){ await updateDoc(doc(db,"sites",id), data); } else { await addDoc(collection(db,"sites"), {...data, createdAt:Date.now(), createdByName:profile.name}); }
     ui.modal=null; render(); showToast(id?"Site updated":"Site added");
+  } else if(act==="reset-password"){
+    const email = b.getAttribute("data-email");
+    try{ await sendPasswordResetEmail(auth, email); showToast("Reset email sent to "+email); }
+    catch(err){ showToast("Could not send reset email \u2014 "+(err.code||"try again")); }
   } else if(act==="add-pending-row"){
     ui.draftPending.items.push({ id:uid(), itemNumber:"", note:"", fulfilled:false });
     render();
