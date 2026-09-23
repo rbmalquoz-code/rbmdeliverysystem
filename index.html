@@ -130,6 +130,7 @@ tr:last-child td{border-bottom:none;}
 @media (max-width:600px){ .kanban{grid-template-columns:1fr;} }
 @media (max-width:760px){
   #app{flex-direction:column;}
+  .app-row{flex-direction:column;}
   .sidebar{position:relative; width:100%; height:auto; flex-direction:column; align-items:stretch; padding:10px 12px; gap:8px;}
   .brand{display:none;}
   .nav{flex-direction:row; overflow-x:auto; gap:4px; padding-bottom:2px;}
@@ -141,7 +142,8 @@ tr:last-child td{border-bottom:none;}
   .session button{margin-left:auto;}
   main{padding:20px 16px 60px;}
 }
-.install-banner{display:flex; align-items:center; gap:10px; background:var(--steel-bg); color:var(--steel-ink); padding:9px 14px; font-size:12.5px; font-weight:500;}
+.install-banner{display:flex; align-items:flex-start; gap:10px; background:var(--steel-bg); color:var(--steel-ink); padding:9px 14px; font-size:12.5px; font-weight:500; line-height:1.5;}
+.install-banner>span{flex:1; padding-top:1px;}
 .install-banner button.dismiss{margin-left:auto; background:none; border:none; color:var(--steel-ink); font-size:16px; line-height:1; cursor:pointer; padding:2px 4px;}
 .install-banner .install-cta{background:var(--steel); color:#fff; border:none; border-radius:6px; padding:5px 12px; font-size:12px; font-weight:600; cursor:pointer; flex-shrink:0;}
 </style>
@@ -441,8 +443,21 @@ function isStandalonePwa(){
 function isIos(){
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
+function isInAppBrowser(){
+  const ua = navigator.userAgent || "";
+  // WhatsApp, Instagram, Facebook, Messenger, Line, Twitter/X, Snapchat, TikTok,
+  // and generic Android WebViews all embed a stripped-down browser that can't
+  // install PWAs, no matter what its own "Share" button does.
+  return /\bwhatsapp\b|FBAN|FBAV|Instagram|Messenger|Line\/|Twitter|Snapchat|TikTok|; ?wv\)/i.test(ua);
+}
 function installBannerHtml(){
   if(ui.installBannerDismissed || isStandalonePwa()) return "";
+  if(isInAppBrowser()){
+    const openHint = isIos()
+      ? "tap the ••• menu (top right) and choose <b>Open in Safari</b>"
+      : "tap the ⋮ menu and choose <b>Open in Chrome</b> (or <b>Open in browser</b>)";
+    return `<div class="install-banner"><span>This link opened inside another app's built-in browser, which can't install apps \u2014 ${openHint}, then install from there.</span><button class="dismiss" data-act="dismiss-install-banner" aria-label="Dismiss">&times;</button></div>`;
+  }
   if(deferredInstallPrompt){
     return `<div class="install-banner"><span>Install this app on your device for quicker access.</span><button class="install-cta" data-act="install-app">Install</button><button class="dismiss" data-act="dismiss-install-banner" aria-label="Dismiss">&times;</button></div>`;
   }
