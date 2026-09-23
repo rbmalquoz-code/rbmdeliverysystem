@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function myCustomerId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.customerId;
+    }
+    function myDriverId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.driverId;
+    }
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && myRole() == "admin"; }
+    function isCounter() { return isSignedIn() && myRole() == "counter"; }
+    function isWarehouse() { return isSignedIn() && myRole() == "warehouse"; }
+    function isCustomer() { return isSignedIn() && myRole() == "customer"; }
+    function isDriver() { return isSignedIn() && myRole() == "driver"; }
+    // Admin and Counter share the same edit rights everywhere except delete,
+    // which stays Admin-only throughout this file.
+    function isFullEditor() { return isAdmin() || isCounter(); }
+
+    match /users/{uid} {
+      allow get: if isSignedIn() && (request.auth.uid == uid || isFullEditor());
+      allow list: if isFullEditor();
+      allow create, update: if isFullEditor();
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{id} {
+      allow read: if isFullEditor() || isWarehouse() || isDriver();
+      allow create, update: if isFullEditor();
+      allow delete: if isAdmin();
+    }
+
+    match /drivers/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isFullEditor();
+      allow delete: if isAdmin();
+    }
+
+    match /rentalDrivers/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isFullEditor();
+      allow delete: if isAdmin();
+    }
+
+    match /sites/{id} {
+      allow read: if isFullEditor() || isWarehouse() || isDriver() ||
+        (isCustomer() && resource.data.customerId == myCustomerId());
+      allow create, update: if isFullEditor() || isWarehouse();
+      allow delete: if isAdmin();
+    }
+
+    // The initial password set at account creation, kept only so Admin can
+    // look it up later. Read is Admin-only even though Counter can manage
+    // users otherwise \u2014 this is the one thing carved out as Admin-exclusive.
+    match /secrets/{uid} {
+      allow read: if isAdmin();
+      allow write: if isFullEditor();
+    }
+
+    // Maps a chosen login username to its (internal, non-secret) auth email
+    // so the sign-in screen can resolve "username" -> email before the
+    // person is authenticated. Only usernames and emails live here, never
+    // passwords. Only Admin/Counter mint these, when creating a customer login.
+    match /usernames/{uname} {
+      allow read: if true;
+      allow write: if isFullEditor();
+    }
+
+    match /invoices/{id} {
+      allow read: if isFullEditor() || isWarehouse() ||
+        (isCustomer() && resource.data.customerId == myCustomerId()) ||
+        (isDriver() && resource.data.driverId == myDriverId());
+
+      allow create: if isFullEditor() || isWarehouse();
+
+      allow update: if isFullEditor() || (
+        isWarehouse() &&
+        request.resource.data.invoiceNumber == resource.data.invoiceNumber &&
+        request.resource.data.doNumber == resource.data.doNumber &&
+        request.resource.data.customerId == resource.data.customerId &&
+        request.resource.data.totalItems == resource.data.totalItems
+      ) || (
+        isDriver() &&
+        resource.data.driverId == myDriverId() &&
+        request.resource.data.status in ["in_transit","delivered"] &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status","history","updatedAt"])
+      );
+
+      allow delete: if isAdmin();
+    }
+  }
+}

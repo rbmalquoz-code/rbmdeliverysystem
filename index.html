@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Reality BM &middot; Delivery Control</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2B4C6F">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RBM Delivery">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -31,7 +39,8 @@
 }
 *{box-sizing:border-box;}
 html,body{height:100%;}
-body{margin:0; background:var(--bg); color:var(--ink);}
+body{margin:0; background:var(--bg); color:var(--ink); padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
 h1,h2,h3,h4{font-family:"Space Grotesk",sans-serif; font-weight:600; margin:0 0 4px;}
 p{margin:0;}
 button,input,select,textarea{font-family:inherit; font-size:14px; color:var(--ink);}
@@ -104,7 +113,7 @@ tr:last-child td{border-bottom:none;}
 .muted{color:var(--ink-muted);}
 .faint{color:var(--ink-faint); font-size:12.5px;}
 .err{color:var(--rust); font-size:12.5px; margin-top:8px;}
-.toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:14px; font-size:13px; font-weight:500; z-index:80; opacity:0; pointer-events:none; transition:opacity .2s; max-width:min(420px,88vw); text-align:center; line-height:1.4;}
+.toast{position:fixed; bottom:calc(20px + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 18px; border-radius:14px; font-size:13px; font-weight:500; z-index:80; opacity:0; pointer-events:none; transition:opacity .2s; max-width:min(420px,88vw); text-align:center; line-height:1.4;}
 .toast.show{opacity:1;}
 .kanban{display:grid; grid-template-columns:repeat(4,1fr); gap:14px;}
 .kcol{background:var(--surface-2); border-radius:12px; padding:12px; max-height:70vh; overflow-y:auto;}
@@ -403,6 +412,22 @@ function navItemsFor(role){
   return [["myorders","My orders"],["sites","My sites"]];
 }
 
+function isStandalonePwa(){
+  return window.matchMedia && window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone===true;
+}
+function isIos(){
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+function installPromptHtml(){
+  if(isStandalonePwa()) return "";
+  if(deferredInstallPrompt){
+    return `<button class="btn btn-ghost btn-sm" data-act="install-app" style="width:100%; margin-bottom:6px;">Install app</button>`;
+  }
+  if(isIos()){
+    return `<p class="faint" style="font-size:11px; margin-bottom:6px;">Tap Share \u2192 Add to Home Screen to install</p>`;
+  }
+  return "";
+}
 function renderShell(){
   const role = profile.role;
   const items = navItemsFor(role);
@@ -413,6 +438,7 @@ function renderShell(){
       <div class="brand"><div class="mark">RB</div><h1>Reality BM</h1><p>Delivery Control</p></div>
       <nav class="nav">${navHtml}</nav>
       <div class="session">
+        ${installPromptHtml()}
         <div class="who">${esc(profile.name)}</div>
         <div class="role">${roleLabel}</div>
         <button class="btn btn-ghost btn-sm" data-act="signout">Sign out</button>
@@ -930,11 +956,18 @@ function userForm(u){
   const linkedCust = u && u.customerId ? customerById(u.customerId) : null;
   const drvOptions = state.drivers.map(d=>`<option value="${d.id}" ${u&&u.driverId===d.id?"selected":""}>${esc(d.name)}</option>`).join("");
   const role = u ? u.role : "warehouse";
+  const newAccountFields = u ? "" : `
+    <div class="field" id="f-newstaff-fields">
+      <label>Temporary password</label><input id="f-password" type="text" placeholder="At least 6 characters">
+      <p class="faint" style="margin-top:6px;">They'll sign in with their <b>name</b> as the username \u2014 no email needed.</p>
+    </div>
+    <div class="field" id="f-newcustomer-note" style="display:none;">
+      <p class="faint">To create a customer login, close this and use <b>Customers \u2192 Open \u2192 Login</b> instead \u2014 it ties the username and password to their company automatically.</p>
+    </div>`;
   return `<h2>${u?"Edit user":"Add user"}</h2>
     <div class="field"><label>Name</label><input id="f-name" value="${u?esc(u.name):""}" placeholder="Full name"></div>
-    ${u ? `<p class="faint" style="margin-bottom:12px;">${esc(u.email||"")}</p>` : `
-    <div class="field"><label>Email</label><input id="f-email" type="email" placeholder="name@company.com"></div>
-    <div class="field"><label>Temporary password</label><input id="f-password" type="text" placeholder="At least 6 characters"></div>`}
+    ${u ? `<p class="faint" style="margin-bottom:12px;">${esc(u.loginUsername ? "Username: "+u.loginUsername : u.email||"")}</p>` : ""}
+    ${newAccountFields}
     <div class="field"><label>Role</label><select id="f-role">
       <option value="warehouse" ${role==="warehouse"?"selected":""}>Warehouse</option>
       <option value="counter" ${role==="counter"?"selected":""}>Counter</option>
@@ -950,7 +983,7 @@ function userForm(u){
     </div>
     <div class="field" id="f-driver-wrap"><label>Linked driver</label><select id="f-driver-link"><option value="">\u2014</option>${drvOptions}</select></div>
     <div class="modal-actions" style="justify-content:space-between;">
-      ${u && u.email ? `<button class="btn btn-sm" data-act="reset-password" data-email="${esc(u.email)}">Send password reset email</button>` : `<span></span>`}
+      ${u && u.email && u.email.indexOf("@customer.")===-1 && u.email.indexOf("@staff.")===-1 ? `<button class="btn btn-sm" data-act="reset-password" data-email="${esc(u.email)}">Send password reset email</button>` : `<span></span>`}
       <div style="display:flex; gap:8px;"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-user" data-id="${u?u.id:""}">${u?"Save changes":"Create login"}</button></div>
     </div>`;
 }
@@ -1219,6 +1252,14 @@ function bindShell(){
   document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click", ()=>{ ui.view=b.getAttribute("data-nav"); ui.modal=null; render(); }));
   const out = document.querySelector('[data-act="signout"]');
   if(out) out.addEventListener("click", ()=>signOut(auth));
+  const installBtn = document.querySelector('[data-act="install-app"]');
+  if(installBtn) installBtn.addEventListener("click", async ()=>{
+    if(!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(()=>{});
+    deferredInstallPrompt = null;
+    render();
+  });
   const main = el("main");
   main.addEventListener("click", mainClickHandler);
   main.addEventListener("change", e=>{
@@ -1261,7 +1302,19 @@ function bindShell(){
     }
     const roleSel = el("f-role");
     if(roleSel){
-      const sync = ()=>{ el("f-customer-wrap").style.display = roleSel.value==="customer" ? "block":"none"; el("f-driver-wrap").style.display = roleSel.value==="driver" ? "block":"none"; };
+      const sync = ()=>{
+        el("f-customer-wrap").style.display = roleSel.value==="customer" ? "block":"none";
+        el("f-driver-wrap").style.display = roleSel.value==="driver" ? "block":"none";
+        const staffFields = el("f-newstaff-fields");
+        const custNote = el("f-newcustomer-note");
+        if(staffFields && custNote){
+          const isNewCustomer = roleSel.value==="customer";
+          staffFields.style.display = isNewCustomer ? "none" : "block";
+          custNote.style.display = isNewCustomer ? "block" : "none";
+          const saveBtn = document.querySelector('[data-act="save-user"]');
+          if(saveBtn) saveBtn.disabled = isNewCustomer;
+        }
+      };
       roleSel.addEventListener("change", sync); sync();
     }
     const newCustSel = el("f-customer");
@@ -1469,24 +1522,45 @@ async function modalClickHandler(e){
       ui.modal=null; render(); showToast("User updated");
       return;
     }
-    const email = el("f-email").value.trim();
+    if(role==="customer"){ showToast("Use Customers \u2192 Open \u2192 Login to create a customer login"); return; }
     const password = el("f-password").value;
-    if(!email || password.length<6){ showToast("Fill in email and a 6+ character password"); return; }
-    try{
-      const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
-      const secondaryAuth = getAuth(secondary);
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-      const newUid = cred.user.uid;
-      await signOut(secondaryAuth);
-      await setDoc(doc(db,"users",newUid), { name, email, role, customerId, driverId, createdAt:Date.now() });
-      await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
-      ui.modal=null; render(); showToast("Login created for "+name);
-    }catch(err){
-      if(err.code==="auth/email-already-in-use"){
-        showToast("That email is already registered \u2014 if it's from a login you deleted here, it still exists in Firebase Console \u2192 Authentication; delete it there or use a different email.");
-      } else {
+    if(password.length<6){ showToast("Enter a temporary password, 6+ characters"); return; }
+    const base = slugifyUsername(name);
+    if(!base){ showToast("Name must contain letters or numbers"); return; }
+    const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
+    const secondaryAuth = getAuth(secondary);
+    let username = base, n = 1, newUid = null, email = "";
+    while(n<=30){
+      username = n===1 ? base : base+n;
+      email = username + "@staff.rbmdeliverysystem.local";
+      let existing;
+      try{ existing = await getDoc(doc(db,"usernames",username)); }
+      catch(err){ showToast("Could not check username availability"); return; }
+      if(existing.exists()){ n++; continue; }
+      try{
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+        newUid = cred.user.uid;
+        break;
+      }catch(err){
+        if(err.code==="auth/email-already-in-use"){ n++; continue; }
+        await signOut(secondaryAuth).catch(()=>{});
         showToast("Could not create login \u2014 "+(err.code||"try again"));
+        return;
       }
+    }
+    if(!newUid){
+      await signOut(secondaryAuth).catch(()=>{});
+      showToast("Could not find a free username after several tries \u2014 try a different name.");
+      return;
+    }
+    try{
+      await signOut(secondaryAuth);
+      await setDoc(doc(db,"users",newUid), { name, email, role, customerId, driverId, loginUsername:username, createdAt:Date.now() });
+      await setDoc(doc(db,"usernames",username), { email, createdAt:Date.now() });
+      await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
+      ui.modal=null; render(); showToast("Login created \u2014 username: "+username);
+    }catch(err){
+      showToast("Could not finish setting up the login \u2014 "+(err.code||"try again"));
     }
   } else if(act==="save-site"){
     const cid = el("f-customer").value || null;
@@ -1814,6 +1888,17 @@ async function createCustomerLogin(customerId){
   }catch(err){
     showToast("Could not finish setting up the login \u2014 "+(err.code||"try again"));
   }
+}
+
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e)=>{
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  render();
+});
+window.addEventListener("appinstalled", ()=>{ deferredInstallPrompt = null; render(); });
+if("serviceWorker" in navigator){
+  window.addEventListener("load", ()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); });
 }
 
 render();
