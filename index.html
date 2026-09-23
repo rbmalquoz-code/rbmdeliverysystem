@@ -73,8 +73,9 @@ button{cursor:pointer;}
 .filter-select{width:auto; min-width:150px; max-width:220px;}
 select{cursor:pointer;}
 @media (max-width:480px){ .search-wrap input{max-width:100%; width:100%;} .filter-select{max-width:100%; width:100%;} }
-#app{min-height:100vh; display:flex;}
-.sidebar{width:220px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--line); padding:20px 14px; display:flex; flex-direction:column; gap:18px; position:sticky; top:0; height:100vh; overflow-y:auto;}
+#app{min-height:100vh; display:flex; flex-direction:column;}
+.app-row{display:flex; flex:1; min-height:0;}
+.sidebar{width:220px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--line); padding:20px 14px; display:flex; flex-direction:column; gap:18px; position:sticky; top:0; align-self:flex-start; height:100vh; max-height:100vh; overflow-y:auto;}
 .brand .mark{width:34px; height:34px; border-radius:8px; background:var(--steel); color:#fff; display:flex; align-items:center; justify-content:center; font-family:"Space Grotesk"; font-weight:700; font-size:15px; margin-bottom:8px;}
 .brand h1{font-size:15px; line-height:1.3;}
 .brand p{font-size:12px; color:var(--ink-muted);}
@@ -129,12 +130,20 @@ tr:last-child td{border-bottom:none;}
 @media (max-width:600px){ .kanban{grid-template-columns:1fr;} }
 @media (max-width:760px){
   #app{flex-direction:column;}
-  .sidebar{position:relative; width:100%; height:auto; flex-direction:row; align-items:center; overflow-x:auto;}
+  .sidebar{position:relative; width:100%; height:auto; flex-direction:column; align-items:stretch; padding:10px 12px; gap:8px;}
   .brand{display:none;}
-  .nav{flex-direction:row;}
-  .session{margin-top:0; border-top:none; padding-top:0; border-left:1px solid var(--line); padding-left:12px; margin-left:auto;}
+  .nav{flex-direction:row; overflow-x:auto; gap:4px; padding-bottom:2px;}
+  .nav button{white-space:nowrap; flex-shrink:0;}
+  .session{margin-top:0; border-top:1px solid var(--line); padding-top:8px; display:flex; align-items:center; gap:10px;}
+  .session .who,.session .role{display:inline; margin:0;}
+  .session .role{margin-left:4px;}
+  .session .role::before{content:"·"; margin-right:4px;}
+  .session button{margin-left:auto;}
   main{padding:20px 16px 60px;}
 }
+.install-banner{display:flex; align-items:center; gap:10px; background:var(--steel-bg); color:var(--steel-ink); padding:9px 14px; font-size:12.5px; font-weight:500;}
+.install-banner button.dismiss{margin-left:auto; background:none; border:none; color:var(--steel-ink); font-size:16px; line-height:1; cursor:pointer; padding:2px 4px;}
+.install-banner .install-cta{background:var(--steel); color:#fff; border:none; border-radius:6px; padding:5px 12px; font-size:12px; font-weight:600; cursor:pointer; flex-shrink:0;}
 </style>
 </head>
 <body>
@@ -181,7 +190,7 @@ let ui = { view: null, modal: null, draftPending: null, loginError: "",
   customersSearch: "", driversSearch: "", usersSearch: "", sitesSearch: "", rentalDriversSearch: "",
   bulkEdit: false, bulkEditSites: false, bulkEditPage: 0, bulkEditSitesPage: 0, importProgress: null,
   selectedCustomerIds: new Set(), selectedSiteIds: new Set(),
-  customersShowLimit: 200, sitesShowLimit: 200 };
+  customersShowLimit: 200, sitesShowLimit: 200, installBannerDismissed: false };
 let visibleCustomerIds = [];
 let visibleSiteIds = [];
 
@@ -366,7 +375,7 @@ function render(){
 }
 
 function renderLogin(){
-  return `<div class="login-wrap"><div class="login-box">
+  return `${installBannerHtml()}<div class="login-wrap"><div class="login-box">
     <div class="brand" style="margin-bottom:18px;">
       <div class="mark">RB</div>
       <h1>Reality BM &middot; Delivery Control</h1>
@@ -378,7 +387,21 @@ function renderLogin(){
     ${ui.loginError ? `<p class="err">${esc(ui.loginError)}</p>` : ""}
   </div></div>`;
 }
+function bindInstallBanner(){
+  const installBtn = document.querySelector('[data-act="install-app"]');
+  if(installBtn) installBtn.addEventListener("click", async ()=>{
+    if(!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(()=>{});
+    deferredInstallPrompt = null;
+    render();
+  });
+  const dismissBtn = document.querySelector('[data-act="dismiss-install-banner"]');
+  if(dismissBtn) dismissBtn.addEventListener("click", ()=>{ ui.installBannerDismissed = true; render(); });
+}
+
 function bindLogin(){
+  bindInstallBanner();
   el("li-submit").addEventListener("click", async ()=>{
     ui.loginError = "";
     const raw = el("li-email").value.trim();
@@ -418,13 +441,13 @@ function isStandalonePwa(){
 function isIos(){
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
-function installPromptHtml(){
-  if(isStandalonePwa()) return "";
+function installBannerHtml(){
+  if(ui.installBannerDismissed || isStandalonePwa()) return "";
   if(deferredInstallPrompt){
-    return `<button class="btn btn-ghost btn-sm" data-act="install-app" style="width:100%; margin-bottom:6px;">Install app</button>`;
+    return `<div class="install-banner"><span>Install this app on your device for quicker access.</span><button class="install-cta" data-act="install-app">Install</button><button class="dismiss" data-act="dismiss-install-banner" aria-label="Dismiss">&times;</button></div>`;
   }
   if(isIos()){
-    return `<p class="faint" style="font-size:11px; margin-bottom:6px;">Tap Share \u2192 Add to Home Screen to install</p>`;
+    return `<div class="install-banner"><span>Tap <b>Share</b> &rarr; <b>Add to Home Screen</b> to install this app.</span><button class="dismiss" data-act="dismiss-install-banner" aria-label="Dismiss">&times;</button></div>`;
   }
   return "";
 }
@@ -434,17 +457,17 @@ function renderShell(){
   if(!ui.view || !items.some(n=>n[0]===ui.view)) ui.view = items[0][0];
   const navHtml = items.map(n=>`<button class="${ui.view===n[0]?"active":""}" data-nav="${n[0]}">${n[1]}</button>`).join("");
   const roleLabel = role==="admin"?"Admin":role==="counter"?"Counter":role==="warehouse"?"Warehouse":role==="driver"?"Driver":"Customer";
-  return `<div class="sidebar">
+  return `${installBannerHtml()}<div class="app-row"><div class="sidebar">
       <div class="brand"><div class="mark">RB</div><h1>Reality BM</h1><p>Delivery Control</p></div>
       <nav class="nav">${navHtml}</nav>
       <div class="session">
-        ${installPromptHtml()}
         <div class="who">${esc(profile.name)}</div>
         <div class="role">${roleLabel}</div>
         <button class="btn btn-ghost btn-sm" data-act="signout">Sign out</button>
       </div>
     </div>
     <main id="main">${renderView()}</main>
+    </div>
     ${ui.modal ? renderModal() : ""}`;
 }
 
@@ -1252,14 +1275,7 @@ function bindShell(){
   document.querySelectorAll("[data-nav]").forEach(b=>b.addEventListener("click", ()=>{ ui.view=b.getAttribute("data-nav"); ui.modal=null; render(); }));
   const out = document.querySelector('[data-act="signout"]');
   if(out) out.addEventListener("click", ()=>signOut(auth));
-  const installBtn = document.querySelector('[data-act="install-app"]');
-  if(installBtn) installBtn.addEventListener("click", async ()=>{
-    if(!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice.catch(()=>{});
-    deferredInstallPrompt = null;
-    render();
-  });
+  bindInstallBanner();
   const main = el("main");
   main.addEventListener("click", mainClickHandler);
   main.addEventListener("change", e=>{
