@@ -1155,10 +1155,12 @@ function customerDetailView(id){
   let loginHtml;
   if(linkedUser){
     const pw = profile.role==="admin" ? secretFor(linkedUser.id) : null;
-    loginHtml = `<p><b>Username:</b> ${esc(linkedUser.loginUsername||linkedUser.email||"\u2014")}</p>` +
+    const uname = linkedUser.loginUsername||linkedUser.email||"";
+    loginHtml = `<p><b>Username:</b> ${esc(uname)} ${uname?`<button class="btn btn-sm btn-ghost" data-act="copy-text" data-copy="${esc(uname)}">Copy</button>`:""}</p>` +
       (profile.role==="admin"
         ? (pw ? `<p style="margin-top:4px;"><b>Password:</b> ${esc(pw)} <button class="btn btn-sm btn-ghost" data-act="copy-password" data-pw="${esc(pw)}">Copy</button></p>` : `<p style="margin-top:4px;" class="faint">Password not stored (created before this feature, or already changed).</p>`)
         : `<p style="margin-top:4px;" class="faint">Password is visible to Admin only.</p>`) +
+      (profile.role==="admin" && pw && uname ? `<button class="btn btn-sm" style="margin-top:8px;" data-act="copy-text" data-copy="Username: ${esc(uname)}\nPassword: ${esc(pw)}">Copy both (to share)</button>` : "") +
       (linkedUser.email && linkedUser.email.indexOf("@customer.")===-1 ? `<button class="btn btn-sm" style="margin-top:8px;" data-act="reset-password" data-email="${esc(linkedUser.email)}">Send password reset email</button>` : "") +
       (profile.role==="admin" ? ` <button class="btn btn-sm btn-danger" style="margin-top:8px;" data-act="del-user" data-id="${linkedUser.id}">Delete login</button>` : "");
   } else {
@@ -1515,6 +1517,7 @@ async function modalClickHandler(e){
   else if(act==="del-site"){ if(confirm("Remove this site?")) await deleteDoc(doc(db,"sites",b.getAttribute("data-id"))); }
   else if(act==="del-user"){ deleteUserAccount(b.getAttribute("data-id")); }
   else if(act==="copy-password"){ copyPassword(b.getAttribute("data-pw")); }
+  else if(act==="copy-text"){ copyText(b.getAttribute("data-copy")); }
   else if(act==="save-customer-detail"){
     const id = b.getAttribute("data-id");
     const name = el("f-name").value.trim();
@@ -1879,6 +1882,12 @@ async function deleteSelectedSites(){
 async function copyPassword(pw){
   if(!pw) return;
   try{ await navigator.clipboard.writeText(pw); showToast("Password copied"); }
+  catch(err){ showToast("Could not copy \u2014 select and copy manually"); }
+}
+
+async function copyText(text){
+  if(!text) return;
+  try{ await navigator.clipboard.writeText(text); showToast("Copied"); }
   catch(err){ showToast("Could not copy \u2014 select and copy manually"); }
 }
 
