@@ -1164,9 +1164,10 @@ function customerDetailView(id){
   } else {
     const previewUser = c.name ? slugifyUsername(c.name) : "";
     const previewPass = c.company ? reverseStr(c.company) : "";
-    loginHtml = `<p class="faint">No login yet. It will be created as:</p>
-      <p style="margin-top:4px;"><b>Username:</b> ${esc(previewUser)||"<i>needs a name</i>"} &middot; <b>Password:</b> ${esc(previewPass)||"<i>needs a company name, 6+ characters</i>"}</p>
-      <button class="btn btn-sm btn-primary" style="margin-top:8px;" data-act="create-customer-login" data-id="${id}">Create login</button>`;
+    loginHtml = `<p class="faint" style="margin-bottom:10px;">No login yet \u2014 suggested below from their name/company, but feel free to change either before creating it.</p>
+      <div class="field"><label>Username</label><input id="f-login-username" value="${esc(previewUser)}" placeholder="username"></div>
+      <div class="field"><label>Password</label><input id="f-login-password" value="${esc(previewPass)}" placeholder="At least 6 characters"></div>
+      <button class="btn btn-sm btn-primary" data-act="create-customer-login" data-id="${id}">Create login</button>`;
   }
 
   return `<h2>${esc(c.name)}</h2>
@@ -1906,46 +1907,29 @@ async function deleteUserAccount(uid){
 async function createCustomerLogin(customerId){
   const c = customerById(customerId);
   if(!c) return;
-  if(!c.name){ showToast("Add a name first"); return; }
-  if(!c.company || reverseStr(c.company).length < 6){ showToast("Add a company name (6+ characters) to generate a password"); return; }
-  const base = slugifyUsername(c.name);
-  if(!base){ showToast("Name must contain letters or numbers"); return; }
-  const password = reverseStr(c.company);
+  const rawUsername = el("f-login-username") ? el("f-login-username").value.trim() : "";
+  const password = el("f-login-password") ? el("f-login-password").value : "";
+  const username = slugifyUsername(rawUsername);
+  if(!username){ showToast("Enter a username (letters and numbers)"); return; }
+  if(username !== rawUsername.toLowerCase()){ showToast("Username can only have lowercase letters and numbers \u2014 try: "+username); return; }
+  if(password.length < 6){ showToast("Password needs to be at least 6 characters"); return; }
 
+  let existing;
+  try{ existing = await getDoc(doc(db,"usernames",username)); }
+  catch(err){ showToast("Could not check username availability"); return; }
+  if(existing.exists()){ showToast("That username is already taken \u2014 pick a different one"); return; }
+
+  const email = username + "@customer.rbmdeliverysystem.local";
   const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
   const secondaryAuth = getAuth(secondary);
-
-  let username = base;
-  let n = 1;
   let newUid = null;
-  let email = "";
-  while(n<=30){
-    username = n===1 ? base : base+n;
-    email = username + "@customer.rbmdeliverysystem.local";
-    let existing;
-    try{ existing = await getDoc(doc(db,"usernames",username)); }
-    catch(err){ showToast("Could not check username availability"); return; }
-    if(existing.exists()){ n++; continue; }
-    try{
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-      newUid = cred.user.uid;
-      break;
-    }catch(err){
-      if(err.code==="auth/email-already-in-use"){
-        // This username's sign-in record still exists from an earlier deleted
-        // login (Firebase won't let us remove someone else's account from
-        // here) \u2014 quietly try the next username instead of getting stuck.
-        n++;
-        continue;
-      }
-      await signOut(secondaryAuth).catch(()=>{});
-      showToast("Could not create login \u2014 "+(err.code||"try again"));
-      return;
-    }
-  }
-  if(!newUid){
+  try{
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    newUid = cred.user.uid;
+  }catch(err){
     await signOut(secondaryAuth).catch(()=>{});
-    showToast("Could not find a free username after several tries \u2014 try a different name.");
+    if(err.code==="auth/email-already-in-use") showToast("That username's sign-in record already exists (maybe from a deleted login) \u2014 try a different username.");
+    else showToast("Could not create login \u2014 "+(err.code||"try again"));
     return;
   }
   try{
@@ -1954,7 +1938,7 @@ async function createCustomerLogin(customerId){
     await setDoc(doc(db,"usernames",username), { email, customerId, createdAt:Date.now() });
     await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
     await updateDoc(doc(db,"customers",customerId), { loginUsername:username });
-    showToast(username===base ? "Login created \u2014 username: "+username : "Login created as \u201c"+username+"\u201d (\u201c"+base+"\u201d was already taken by a deleted login)");
+    showToast("Login created \u2014 username: "+username);
     render();
   }catch(err){
     showToast("Could not finish setting up the login \u2014 "+(err.code||"try again"));
