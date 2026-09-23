@@ -323,6 +323,27 @@ function startListeners(){
   if(role==="admin"){
     unsubs.push(onSnapshot(collection(db,"secrets"), snap=>{ state.secrets = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   }
+
+  // Live-watch our own account so a role/access change made by an admin
+  // while we're signed in takes effect immediately, without needing to log out.
+  unsubs.push(onSnapshot(doc(db,"users",profile.uid), snap=>{
+    if(!snap.exists()){
+      showToast("Your access was removed.");
+      signOut(auth);
+      return;
+    }
+    const d = snap.data();
+    const changed = d.role!==profile.role || (d.customerId||null)!==(profile.customerId||null) || (d.driverId||null)!==(profile.driverId||null);
+    profile = { uid:profile.uid, name:d.name||profile.name, role:d.role, customerId:d.customerId||null, driverId:d.driverId||null };
+    if(changed){
+      showToast("Your access was updated.");
+      ui.view = null;
+      cleanupListeners();
+      startListeners();
+    } else {
+      render();
+    }
+  }, ()=>{}));
   render();
 }
 
@@ -1461,7 +1482,11 @@ async function modalClickHandler(e){
       await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
       ui.modal=null; render(); showToast("Login created for "+name);
     }catch(err){
-      showToast("Could not create login \u2014 "+(err.code||"try again"));
+      if(err.code==="auth/email-already-in-use"){
+        showToast("That email is already registered \u2014 if it's from a login you deleted here, it still exists in Firebase Console \u2192 Authentication; delete it there or use a different email.");
+      } else {
+        showToast("Could not create login \u2014 "+(err.code||"try again"));
+      }
     }
   } else if(act==="save-site"){
     const cid = el("f-customer").value || null;
@@ -1715,15 +1740,16 @@ async function deleteUserAccount(uid){
   const u = state.users.find(x=>x.id===uid);
   if(!u) return;
   const msg = "Delete this login? They will no longer be able to sign in.\n\n" +
-    "Note: this removes their access in the app immediately, but the underlying " +
-    "sign-in record stays in Firebase (client apps can't delete other users' accounts) " +
-    "\u2014 if you want that email/username fully freed up for reuse, also remove it in " +
-    "Firebase Console \u2192 Authentication.";
+    "Note: the underlying Firebase sign-in record can't be removed from here " +
+    "(only Admin SDK / server code can do that) \u2014 but creating a new login for " +
+    "this person again afterward will still work fine, it'll just quietly pick a " +
+    "different username if the old one's email is still reserved.";
   if(!confirm(msg)) return;
   try{
     await deleteDoc(doc(db,"users",uid));
     if(u.loginUsername){ try{ await deleteDoc(doc(db,"usernames",u.loginUsername)); }catch(e){} }
     try{ await deleteDoc(doc(db,"secrets",uid)); }catch(e){}
+    if(u.customerId){ try{ await updateDoc(doc(db,"customers",u.customerId), { loginUsername:null }); }catch(e){} }
     if(ui.modal && ui.modal.type==="customer-detail"){ render(); }
     else { ui.modal=null; render(); }
     showToast("Login deleted");
@@ -1739,36 +1765,54 @@ async function createCustomerLogin(customerId){
   if(!c.company || reverseStr(c.company).length < 6){ showToast("Add a company name (6+ characters) to generate a password"); return; }
   const base = slugifyUsername(c.name);
   if(!base){ showToast("Name must contain letters or numbers"); return; }
+  const password = reverseStr(c.company);
+
+  const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
+  const secondaryAuth = getAuth(secondary);
+
   let username = base;
   let n = 1;
-  while(true){
+  let newUid = null;
+  let email = "";
+  while(n<=30){
+    username = n===1 ? base : base+n;
+    email = username + "@customer.rbmdeliverysystem.local";
     let existing;
     try{ existing = await getDoc(doc(db,"usernames",username)); }
     catch(err){ showToast("Could not check username availability"); return; }
-    if(!existing.exists()) break;
-    n++; username = base + n;
-    if(n>50){ showToast("Could not find a free username"); return; }
+    if(existing.exists()){ n++; continue; }
+    try{
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      newUid = cred.user.uid;
+      break;
+    }catch(err){
+      if(err.code==="auth/email-already-in-use"){
+        // This username's sign-in record still exists from an earlier deleted
+        // login (Firebase won't let us remove someone else's account from
+        // here) \u2014 quietly try the next username instead of getting stuck.
+        n++;
+        continue;
+      }
+      await signOut(secondaryAuth).catch(()=>{});
+      showToast("Could not create login \u2014 "+(err.code||"try again"));
+      return;
+    }
   }
-  const password = reverseStr(c.company);
-  const email = username + "@customer.rbmdeliverysystem.local";
+  if(!newUid){
+    await signOut(secondaryAuth).catch(()=>{});
+    showToast("Could not find a free username after several tries \u2014 try a different name.");
+    return;
+  }
   try{
-    const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
-    const secondaryAuth = getAuth(secondary);
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-    const newUid = cred.user.uid;
     await signOut(secondaryAuth);
     await setDoc(doc(db,"users",newUid), { name:c.name, email, role:"customer", customerId, driverId:null, loginUsername:username, createdAt:Date.now() });
     await setDoc(doc(db,"usernames",username), { email, customerId, createdAt:Date.now() });
     await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
     await updateDoc(doc(db,"customers",customerId), { loginUsername:username });
-    showToast("Login created \u2014 username: "+username);
+    showToast(username===base ? "Login created \u2014 username: "+username : "Login created as \u201c"+username+"\u201d (\u201c"+base+"\u201d was already taken by a deleted login)");
     render();
   }catch(err){
-    if(err.code==="auth/email-already-in-use"){
-      showToast("That username's sign-in record already exists in Firebase from a previous login \u2014 delete it in Firebase Console \u2192 Authentication, then try again.");
-    } else {
-      showToast("Could not create login \u2014 "+(err.code||"try again"));
-    }
+    showToast("Could not finish setting up the login \u2014 "+(err.code||"try again"));
   }
 }
 
