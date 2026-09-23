@@ -299,6 +299,7 @@ function buildStatusMessage(inv){
 
 onAuthStateChanged(auth, async (user) => {
   cleanupListeners();
+  state = { customers: [], drivers: [], invoices: [], users: [], sites: [], secrets: [], rentalDrivers: [] };
   if(!user){ profile=null; render(); return; }
   try{
     const snap = await getDoc(doc(db,"users",user.uid));
