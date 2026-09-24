@@ -155,10 +155,11 @@ tr:last-child td{border-bottom:none;}
 <script type="module">
 import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, sendPasswordResetEmail
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, sendPasswordResetEmail,
+  setPersistence, browserLocalPersistence, browserSessionPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, onSnapshot, query, where, writeBatch
+  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, setDoc, getDoc, getDocs, onSnapshot, query, where, orderBy, limit, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -172,6 +173,10 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+// Default to session-only persistence (cleared when the browser/tab fully closes)
+// so a shared device doesn't stay signed in as whoever last used it. "Remember me"
+// on the login screen switches this to persist-until-sign-out for that one login.
+setPersistence(auth, browserSessionPersistence).catch(()=>{});
 const db = getFirestore(app);
 
 const STATUS_LABEL = { ordered:"Ordered", getting_ready:"Getting ready", in_transit:"In transit", delivered:"Delivered" };
@@ -202,7 +207,21 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&am
 function fmtDate(ts){ if(!ts) return ""; return new Date(ts).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
 function fmtDateTime(ts){ if(!ts) return ""; return new Date(ts).toLocaleString(undefined,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }
 function showToast(msg){ const t=el("toast"); t.textContent=msg; t.classList.add("show"); const dur = msg.length>60 ? 5200 : 2200; clearTimeout(showToast._t); showToast._t = setTimeout(()=>t.classList.remove("show"),dur); }
-function customerById(id){ return state.customers.find(c=>c.id===id); }
+const pendingCustomerFetches = new Set();
+function customerById(id){
+  const found = state.customers.find(c=>c.id===id);
+  if(!found && id && !pendingCustomerFetches.has(id) && typeof db!=="undefined"){
+    pendingCustomerFetches.add(id);
+    getDoc(doc(db,"customers",id)).then(snap=>{
+      pendingCustomerFetches.delete(id);
+      if(snap.exists() && !state.customers.some(c=>c.id===id)){
+        state.customers = [...state.customers, {id:snap.id, ...snap.data()}];
+        render();
+      }
+    }).catch(()=>{ pendingCustomerFetches.delete(id); });
+  }
+  return found;
+}
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 function rentalDriverById(id){ return state.rentalDrivers.find(d=>d.id===id); }
 function assignedDriverInfo(inv){
@@ -320,6 +339,66 @@ onAuthStateChanged(auth, async (user) => {
 
 function cleanupListeners(){ unsubs.forEach(u=>u&&u()); unsubs=[]; }
 
+function watchCustomersDefault(){
+  ui.loaded.customers = false;
+  const q = query(collection(db,"customers"), orderBy("createdAt","desc"), limit(150));
+  const attemptSub = (attempt)=>{
+    const unsub = onSnapshot(q, snap=>{
+      const fresh = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const freshIds = new Set(fresh.map(c=>c.id));
+      // Keep any customers loaded separately (via search or a direct reference
+      // that isn't in this default recent-150 window) instead of wiping them out.
+      const extras = state.customers.filter(c=>!freshIds.has(c.id));
+      state.customers = [...fresh, ...extras];
+      ui.loaded.customers = true;
+      render();
+    }, ()=>{
+      if(attempt < 4) setTimeout(()=>attemptSub(attempt+1), 600*(attempt+1));
+    });
+    unsubs.push(unsub);
+  };
+  attemptSub(0);
+}
+
+async function searchCustomersServer(term){
+  const t = term.trim().toLowerCase();
+  if(!t) return;
+  try{
+    const q = query(collection(db,"customers"), orderBy("nameLower"), where("nameLower",">=",t), where("nameLower","<",t+"\uf8ff"), limit(25));
+    const snap = await getDocs(q);
+    let changed = false;
+    snap.docs.forEach(d=>{
+      if(!state.customers.some(c=>c.id===d.id)){
+        state.customers = [...state.customers, {id:d.id, ...d.data()}];
+        changed = true;
+      }
+    });
+    if(changed) render();
+  }catch(e){ /* search-by-prefix needs the nameLower field; older records without it just won't surface here until edited or the index is rebuilt */ }
+}
+
+async function rebuildCustomerSearchIndex(){
+  if(!confirm("This reads every customer once to enable name search for older records that were imported before search was added. It's a one-time cost, not a recurring one. Continue?")) return;
+  showToast("Rebuilding search index\u2026 this may take a minute");
+  let snap;
+  try{ snap = await getDocs(collection(db,"customers")); }
+  catch(err){ showToast("Could not read customers \u2014 try again"); return; }
+  const needsUpdate = snap.docs.filter(d=>!d.data().nameLower);
+  if(!needsUpdate.length){ showToast("Search index is already up to date"); return; }
+  const CHUNK = 400;
+  for(let i=0;i<needsUpdate.length;i+=CHUNK){
+    const chunk = needsUpdate.slice(i,i+CHUNK);
+    const batch = writeBatch(db);
+    chunk.forEach(d=>{
+      const name = d.data().name || "";
+      batch.update(doc(db,"customers",d.id), { nameLower: name.toLowerCase() });
+    });
+    try{ await batch.commit(); }
+    catch(err){ showToast("Stopped partway \u2014 "+(err.code||"error")+". Run it again to finish the rest."); return; }
+  }
+  showToast("Search index rebuilt for "+needsUpdate.length+" customers");
+}
+
 function watchCollection(ref, key){
   ui.loaded[key] = false;
   const attemptSub = (attempt)=>{
@@ -340,7 +419,7 @@ function startListeners(){
   ui.loaded = {};
 
   if(role==="admin" || role==="counter" || role==="warehouse" || role==="driver"){
-    watchCollection(collection(db,"customers"), "customers");
+    watchCustomersDefault();
   } else { ui.loaded.customers = true; }
   watchCollection(collection(db,"drivers"), "drivers");
   watchCollection(collection(db,"rentalDrivers"), "rentalDrivers");
@@ -427,6 +506,7 @@ function renderLogin(){
     </div>
     <div class="field"><label>Email or username</label><input id="li-email" placeholder="name@company.com or your username"></div>
     <div class="field"><label>Password</label><input id="li-pass" type="password" placeholder="Password"></div>
+    <div class="field" style="margin-bottom:16px;"><label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:400;"><input type="checkbox" id="li-remember" style="width:auto;"> Remember me on this device</label></div>
     <button class="btn btn-primary" id="li-submit" style="width:100%;">Sign in</button>
     ${ui.loginError ? `<p class="err">${esc(ui.loginError)}</p>` : ""}
   </div></div>`;
@@ -459,7 +539,10 @@ function bindLogin(){
         email = lookup.data().email;
       }catch(e){ ui.loginError="Could not look up that username. Try again."; render(); return; }
     }
-    try{ await signInWithEmailAndPassword(auth, email, pass); }
+    try{
+      await setPersistence(auth, el("li-remember").checked ? browserLocalPersistence : browserSessionPersistence);
+      await signInWithEmailAndPassword(auth, email, pass);
+    }
     catch(e){
       if(e.code==="auth/wrong-password" || e.code==="auth/invalid-credential") ui.loginError = "That password doesn't match. If it was just created or changed, double-check for a stray space when copying it.";
       else if(e.code==="auth/user-not-found") ui.loginError = "No account found for that username/email.";
@@ -701,6 +784,7 @@ function viewCustomers(){
     ${searchBox("customers-search", ui.customersSearch, "Search name, company or phone")}
     ${isFullEditor ? `<button class="btn" data-act="toggle-bulk-edit">${ui.bulkEdit?"Cancel bulk edit":"Bulk edit"}</button>` : ""}
     ${isFullEditor ? `<button class="btn" data-act="open-import-customers">Import customers</button>` : ""}
+    ${isAdmin ? `<button class="btn" data-act="rebuild-search-index">Rebuild search index</button>` : ""}
     ${!ui.bulkEdit ? `<button class="btn btn-primary" data-act="new-customer">Add customer</button>` : ""}
   </div>`;
 
@@ -757,6 +841,7 @@ async function saveBulkEditCustomers(onDone){
     const next = rows[id];
     const diff = {};
     ["name","company","phone","address"].forEach(f=>{ if((orig[f]||"") !== (next[f]||"")) diff[f] = next[f]; });
+    if(diff.name !== undefined) diff.nameLower = diff.name.toLowerCase();
     if(Object.keys(diff).length){ batch.update(doc(db,"customers",id), diff); changed++; }
   });
   if(!changed){ if(onDone){ onDone(); } else { showToast("No changes to save"); ui.bulkEdit=false; render(); } return; }
@@ -1046,29 +1131,29 @@ function newInvoiceForm(){
   }
   const driverOptions = `<option value="">Assign later</option>` + state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
   const rentalDriverOptions = `<option value="">\u2014</option>` + state.rentalDrivers.map(d=>`<option value="${d.id}">${esc(d.name)}${d.agency?" \u2014 "+esc(d.agency):""}</option>`).join("");
-  if(!ui.draftLegs || !ui.draftLegs.length) ui.draftLegs = [{donum:"",total:"",siteIds:[]}];
+  if(!ui.draftLegs || !ui.draftLegs.length) ui.draftLegs = [{invnum:"",donum:"",total:"",siteIds:[]}];
   const custIdNow = el("f-customer") ? el("f-customer").value : "";
   const legsHtml = ui.draftLegs.map((leg,idx)=>`<div class="card" style="margin-bottom:10px; padding:14px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <b style="font-size:13px;">Delivery ${idx+1}</b>
+        <b style="font-size:13px;">Invoice ${idx+1}</b>
         ${ui.draftLegs.length>1?`<button type="button" class="btn btn-sm btn-ghost" data-act="remove-invoice-leg" data-idx="${idx}">Remove</button>`:""}
       </div>
+      <div class="field"><label>Invoice number (from the counter)</label><input id="f-leg-invnum-${idx}" value="${esc(leg.invnum||"")}" placeholder="e.g. 4021"><p class="faint" style="margin-top:4px;">Shown as CIV-<i>whatever you enter</i>.</p></div>
       <div class="field"><label>DO number</label><input id="f-leg-donum-${idx}" value="${esc(leg.donum||"")}" placeholder="e.g. DO-1187"></div>
-      <div class="field"><label>Delivery site(s) for this DO</label><div id="f-leg-sites-${idx}">${siteCheckboxesHtml(custIdNow, leg.siteIds||[], "f-leg-sites-"+idx)}</div></div>
-      <div class="field" style="margin-bottom:0;"><label>Total items for this DO</label><input id="f-leg-total-${idx}" type="number" min="1" value="${esc(leg.total||"")}" placeholder="e.g. 20"></div>
+      <div class="field"><label>Delivery site(s)</label><div id="f-leg-sites-${idx}">${siteCheckboxesHtml(custIdNow, leg.siteIds||[], "f-leg-sites-"+idx)}</div></div>
+      <div class="field" style="margin-bottom:0;"><label>Total items</label><input id="f-leg-total-${idx}" type="number" min="1" value="${esc(leg.total||"")}" placeholder="e.g. 20"></div>
     </div>`).join("");
   return `<h2>New invoice</h2>
-    <div class="field"><label>Invoice number (from the counter)</label><input id="f-invnum" value="${el("f-invnum")?esc(el("f-invnum").value):""}" placeholder="e.g. 4021"><p class="faint" style="margin-top:4px;">Shown as CIV-<i>whatever you enter</i> \u2014 no need to type CIV- yourself.</p></div>
     <div class="field" style="position:relative;">
       <label>Customer</label>
       <input id="f-invcust-search" autocomplete="off" placeholder="Search customer" value="${el("f-invcust-search")?esc(el("f-invcust-search").value):""}">
       <input type="hidden" id="f-customer" value="${esc(custIdNow)}">
       <div id="f-invcust-results" class="searchlist" style="display:none; position:absolute; z-index:6; width:100%; background:var(--surface);"></div>
     </div>
-    <h3 style="font-size:14px; margin:16px 0 4px;">Deliveries under this invoice</h3>
-    <p class="faint" style="margin-bottom:10px;">One invoice number can cover several separate deliveries \u2014 each with its own DO number, site, and item count.</p>
+    <h3 style="font-size:14px; margin:16px 0 4px;">Invoices for this customer</h3>
+    <p class="faint" style="margin-bottom:10px;">Add as many separate invoices as needed in one go \u2014 each gets its own invoice number, DO number, and site.</p>
     ${legsHtml}
-    <button type="button" class="btn btn-sm btn-ghost" data-act="add-invoice-leg" style="margin-bottom:14px;">+ Add another delivery (separate DO/location)</button>
+    <button type="button" class="btn btn-sm btn-ghost" data-act="add-invoice-leg" style="margin-bottom:14px;">+ Add another invoice</button>
     <div class="field"><label>Company driver (optional, can assign later)</label><select id="f-driver-new">${driverOptions}</select></div>
     <div class="field"><label>Rental driver (optional, outside/non-employee)</label><select id="f-rental-driver-new">${rentalDriverOptions}</select></div>
     <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-selfpickup-new" style="width:auto;"> Self pickup \u2014 customer will collect, no driver needed</label></div>
@@ -1359,6 +1444,7 @@ function bindCustomerFilterPicker(searchId, resultsId, opts){
     if(term && !matches.length) html += `<span class="faint" style="display:block; padding:10px 12px;">No match</span>`;
     results.innerHTML = html;
     results.style.display = "block";
+    if(term) searchCustomersServer(term);
   }
   results.addEventListener("mousedown", (e)=>{ e.preventDefault(); e.stopPropagation(); }, true);
   results.addEventListener("click", (e)=>{
@@ -1396,7 +1482,7 @@ function bindShell(){
   bindSearchInput("pendingorders-search", v=>{ ui.pendingOrdersSearch = v; });
   bindSearchInput("pending-items-search", v=>{ ui.pendingItemsSearch = v; });
   bindSearchInput("delivered-search", v=>{ ui.deliveredSearch = v; ui.deliveredShowLimit = 200; });
-  bindSearchInput("customers-search", v=>{ ui.customersSearch = v; ui.bulkEditPage = 0; ui.customersShowLimit = 200; });
+  bindSearchInput("customers-search", v=>{ ui.customersSearch = v; ui.bulkEditPage = 0; ui.customersShowLimit = 200; if(v.trim()) searchCustomersServer(v); });
   bindSearchInput("drivers-search", v=>{ ui.driversSearch = v; });
   bindSearchInput("rental-drivers-search", v=>{ ui.rentalDriversSearch = v; });
   bindSearchInput("users-search", v=>{ ui.usersSearch = v; });
@@ -1492,6 +1578,7 @@ function bindCustomerPicker(searchId, hiddenId, resultsId, emptyLabel){
     if(term && !matches.length) html += `<span class="faint" style="display:block; padding:10px 12px;">No match</span>`;
     results.innerHTML = html;
     results.style.display = "block";
+    if(term) searchCustomersServer(term);
   }
   results.addEventListener("mousedown", (e)=>{ e.preventDefault(); e.stopPropagation(); }, true);
   results.addEventListener("click", (e)=>{
@@ -1524,6 +1611,7 @@ function mainClickHandler(e){
   if(act==="toggle-bulk-edit"){ ui.bulkEdit = !ui.bulkEdit; ui.bulkEditPage=0; render(); return; }
   if(act==="save-bulk-edit"){ saveBulkEditCustomers(); return; }
   if(act==="open-import-customers"){ ui.modal={type:"import-customers"}; ui.importProgress=null; render(); return; }
+  if(act==="rebuild-search-index"){ rebuildCustomerSearchIndex(); return; }
   if(act==="toggle-bulk-edit-sites"){ ui.bulkEditSites = !ui.bulkEditSites; ui.bulkEditSitesPage=0; render(); return; }
   if(act==="save-bulk-edit-sites"){ saveBulkEditSites(); return; }
   if(act==="open-import-sites"){ ui.modal={type:"import-sites"}; ui.importProgress=null; render(); return; }
@@ -1534,7 +1622,7 @@ function mainClickHandler(e){
   if(act==="show-more-customers"){ ui.customersShowLimit += 200; render(); return; }
   if(act==="show-more-sites"){ ui.sitesShowLimit += 200; render(); return; }
   if(act==="show-more-delivered"){ ui.deliveredShowLimit += 200; render(); return; }
-  if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; ui.draftLegs=[{donum:"",total:"",siteIds:[]}]; render(); }
+  if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; ui.draftLegs=[{invnum:"",donum:"",total:"",siteIds:[]}]; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
   else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
   else if(act==="open-customer"){ ui.modal={type:"customer-detail", id:b.getAttribute("data-id")}; render(); }
@@ -1580,7 +1668,7 @@ async function modalClickHandler(e){
     const id = b.getAttribute("data-id");
     const name = el("f-name").value.trim();
     if(!name){ showToast("Enter a name"); return; }
-    await updateDoc(doc(db,"customers",id), { name, company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address-c").value.trim() });
+    await updateDoc(doc(db,"customers",id), { name, nameLower:name.toLowerCase(), company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address-c").value.trim() });
     showToast("Saved");
     render();
   }
@@ -1603,7 +1691,7 @@ async function modalClickHandler(e){
   else if(act==="save-customer"){
     const name = el("f-name").value.trim();
     if(!name){ showToast("Enter a name"); return; }
-    const data = { name, company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address").value.trim() };
+    const data = { name, nameLower:name.toLowerCase(), company:el("f-company").value.trim(), phone:el("f-phone").value.trim(), address:el("f-address").value.trim() };
     const id = b.getAttribute("data-id");
     if(id){ await updateDoc(doc(db,"customers",id), data); } else { await addDoc(collection(db,"customers"), {...data, createdAt:Date.now()}); }
     ui.modal=null; render(); showToast(id?"Customer updated":"Customer added");
@@ -1622,27 +1710,26 @@ async function modalClickHandler(e){
     if(id){ await updateDoc(doc(db,"rentalDrivers",id), data); } else { await addDoc(collection(db,"rentalDrivers"), {...data, createdAt:Date.now()}); }
     ui.modal=null; render(); showToast(id?"Rental driver updated":"Rental driver added");
   } else if(act==="save-invoice"){
-    const num = el("f-invnum").value.trim();
     const cid = el("f-customer").value;
     const selfPickup = el("f-selfpickup-new") ? el("f-selfpickup-new").checked : false;
     const driverId = selfPickup ? null : (el("f-driver-new").value || null);
     const rentalDriverId = selfPickup ? null : (el("f-rental-driver-new") ? (el("f-rental-driver-new").value||null) : null);
     const notes = el("f-notes").value.trim();
-    if(!num || !cid){ showToast("Fill in invoice number and customer"); return; }
+    if(!cid){ showToast("Pick a customer"); return; }
     syncDraftLegsFromDom();
-    const legs = (ui.draftLegs||[]).filter(l=>l.donum.trim()!=="" || l.total || (l.siteIds&&l.siteIds.length));
-    const finalLegs = legs.length ? legs : [{donum:"",total:"",siteIds:[]}];
-    for(const leg of finalLegs){
+    const legs = (ui.draftLegs||[]).filter(l=>l.invnum.trim()!=="");
+    if(!legs.length){ showToast("Enter at least one invoice number"); return; }
+    for(const leg of legs){
       const newInv = {
-        invoiceNumber:num, doNumber:leg.donum.trim(), customerId:cid, totalItems:parseInt(leg.total,10)||0, pendingItems:[],
+        invoiceNumber:leg.invnum.trim(), doNumber:leg.donum.trim(), customerId:cid, totalItems:parseInt(leg.total,10)||0, pendingItems:[],
         status:"ordered", driverId, rentalDriverId, selfPickup, siteIds:leg.siteIds||[], notes,
         createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name, createdByRole:profile.role
       };
-      newInv.history = [histLine("Invoice created"+(selfPickup?" (self pickup)":"")+(finalLegs.length>1?" \u2014 one of "+finalLegs.length+" deliveries under this invoice number":""))];
+      newInv.history = [histLine("Invoice created"+(selfPickup?" (self pickup)":""))];
       await addDoc(collection(db,"invoices"), newInv);
     }
     ui.draftLegs = null;
-    ui.modal=null; render(); showToast(finalLegs.length>1 ? finalLegs.length+" deliveries created" : "Invoice created");
+    ui.modal=null; render(); showToast(legs.length>1 ? legs.length+" invoices created" : "Invoice created");
   } else if(act==="save-user"){
     const name = el("f-name").value.trim();
     const role = el("f-role").value;
@@ -1717,7 +1804,7 @@ async function modalClickHandler(e){
     catch(err){ showToast("Could not send reset email \u2014 "+(err.code||"try again")); }
   } else if(act==="add-invoice-leg"){
     syncDraftLegsFromDom();
-    ui.draftLegs.push({donum:"",total:"",siteIds:[]});
+    ui.draftLegs.push({invnum:"",donum:"",total:"",siteIds:[]});
     render();
   } else if(act==="remove-invoice-leg"){
     syncDraftLegsFromDom();
@@ -1809,9 +1896,11 @@ function syncPendingFromInputs(){
 function syncDraftLegsFromDom(){
   if(!ui.draftLegs) return;
   ui.draftLegs.forEach((leg,idx)=>{
+    const invnumEl = el("f-leg-invnum-"+idx);
     const donumEl = el("f-leg-donum-"+idx);
     const totalEl = el("f-leg-total-"+idx);
     const sitesBox = el("f-leg-sites-"+idx);
+    if(invnumEl) leg.invnum = invnumEl.value;
     if(donumEl) leg.donum = donumEl.value;
     if(totalEl) leg.total = totalEl.value;
     if(sitesBox) leg.siteIds = Array.from(sitesBox.querySelectorAll(".site-check:checked")).map(cb=>cb.getAttribute("data-site-id"));
@@ -1871,7 +1960,11 @@ async function customerMarkReceived(invId){
 }
 
 async function runCustomerImport(names){
-  const existing = new Set(state.customers.map(c=>(c.name||"").trim().toLowerCase()));
+  showToast("Checking for existing names\u2026");
+  let existingDocs;
+  try{ existingDocs = await getDocs(collection(db,"customers")); }
+  catch(err){ showToast("Could not check existing customers \u2014 try again"); return; }
+  const existing = new Set(existingDocs.docs.map(d=>(d.data().name||"").trim().toLowerCase()));
   const seen = new Set();
   const toAdd = [];
   names.forEach(n=>{
@@ -1891,7 +1984,7 @@ async function runCustomerImport(names){
     const batch = writeBatch(db);
     chunk.forEach(n=>{
       const ref = doc(collection(db,"customers"));
-      batch.set(ref, { name:n, company:n, phone:"", address:"", createdAt:Date.now() });
+      batch.set(ref, { name:n, nameLower:n.toLowerCase(), company:n, phone:"", address:"", createdAt:Date.now() });
     });
     try{ await batch.commit(); }
     catch(err){ showToast("Import stopped \u2014 "+(err.code||"error")+". "+ui.importProgress.done+" were added."); return; }
