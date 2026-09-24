@@ -192,7 +192,7 @@ let ui = { view: null, modal: null, draftPending: null, loginError: "",
   customersSearch: "", driversSearch: "", usersSearch: "", sitesSearch: "", rentalDriversSearch: "",
   bulkEdit: false, bulkEditSites: false, bulkEditPage: 0, bulkEditSitesPage: 0, importProgress: null,
   selectedCustomerIds: new Set(), selectedSiteIds: new Set(),
-  customersShowLimit: 200, sitesShowLimit: 200, installBannerDismissed: false };
+  customersShowLimit: 200, sitesShowLimit: 200, installBannerDismissed: false, loaded: {} };
 let visibleCustomerIds = [];
 let visibleSiteIds = [];
 
@@ -320,37 +320,50 @@ onAuthStateChanged(auth, async (user) => {
 
 function cleanupListeners(){ unsubs.forEach(u=>u&&u()); unsubs=[]; }
 
+function watchCollection(ref, key){
+  ui.loaded[key] = false;
+  const attemptSub = (attempt)=>{
+    const unsub = onSnapshot(ref, snap=>{
+      state[key] = snap.docs.map(d=>({id:d.id,...d.data()}));
+      ui.loaded[key] = true;
+      render();
+    }, ()=>{
+      if(attempt < 4) setTimeout(()=>attemptSub(attempt+1), 600*(attempt+1));
+    });
+    unsubs.push(unsub);
+  };
+  attemptSub(0);
+}
+
 function startListeners(){
   const role = profile.role;
+  ui.loaded = {};
 
   if(role==="admin" || role==="counter" || role==="warehouse" || role==="driver"){
-    unsubs.push(onSnapshot(collection(db,"customers"), snap=>{ state.customers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
-  }
-  unsubs.push(onSnapshot(collection(db,"drivers"), snap=>{ state.drivers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
-  unsubs.push(onSnapshot(collection(db,"rentalDrivers"), snap=>{ state.rentalDrivers = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+    watchCollection(collection(db,"customers"), "customers");
+  } else { ui.loaded.customers = true; }
+  watchCollection(collection(db,"drivers"), "drivers");
+  watchCollection(collection(db,"rentalDrivers"), "rentalDrivers");
 
   if(role==="customer"){
-    const siteQ = query(collection(db,"sites"), where("customerId","==",profile.customerId));
-    unsubs.push(onSnapshot(siteQ, snap=>{ state.sites = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+    watchCollection(query(collection(db,"sites"), where("customerId","==",profile.customerId)), "sites");
   } else {
-    unsubs.push(onSnapshot(collection(db,"sites"), snap=>{ state.sites = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+    watchCollection(collection(db,"sites"), "sites");
   }
 
   if(role==="customer"){
-    const invQ = query(collection(db,"invoices"), where("customerId","==",profile.customerId));
-    unsubs.push(onSnapshot(invQ, snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+    watchCollection(query(collection(db,"invoices"), where("customerId","==",profile.customerId)), "invoices");
   } else if(role==="driver"){
-    const invQ = query(collection(db,"invoices"), where("driverId","==",profile.driverId));
-    unsubs.push(onSnapshot(invQ, snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+    watchCollection(query(collection(db,"invoices"), where("driverId","==",profile.driverId)), "invoices");
   } else {
-    unsubs.push(onSnapshot(collection(db,"invoices"), snap=>{ state.invoices = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+    watchCollection(collection(db,"invoices"), "invoices");
   }
   if(role==="admin" || role==="counter"){
-    unsubs.push(onSnapshot(collection(db,"users"), snap=>{ state.users = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
-  }
+    watchCollection(collection(db,"users"), "users");
+  } else { ui.loaded.users = true; }
   if(role==="admin"){
-    unsubs.push(onSnapshot(collection(db,"secrets"), snap=>{ state.secrets = snap.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
-  }
+    watchCollection(collection(db,"secrets"), "secrets");
+  } else { ui.loaded.secrets = true; }
 
   // Live-watch our own account so a role/access change made by an admin
   // while we're signed in takes effect immediately, without needing to log out.
@@ -380,8 +393,29 @@ function startListeners(){
 function render(){
   const app = el("app");
   if(!profile){ app.innerHTML = renderLogin(); bindLogin(); return; }
+
+  // A background data update (someone else's edit, or our own live listeners)
+  // can trigger a re-render at any moment, including while the person is
+  // mid-typing into an open modal. Capture the focused field first so we can
+  // restore exactly what they'd typed and where their cursor was, instead of
+  // silently reverting it to the last-saved value and stealing focus.
+  const active = document.activeElement;
+  let focusInfo = null;
+  if(active && active.id && (active.tagName==="INPUT" || active.tagName==="TEXTAREA")){
+    focusInfo = { id:active.id, value:active.value, selStart:active.selectionStart, selEnd:active.selectionEnd };
+  }
+
   app.innerHTML = renderShell();
   bindShell();
+
+  if(focusInfo){
+    const restored = document.getElementById(focusInfo.id);
+    if(restored && (restored.tagName==="INPUT" || restored.tagName==="TEXTAREA") && restored.type!=="checkbox" && restored.type!=="hidden"){
+      restored.value = focusInfo.value;
+      restored.focus();
+      try{ restored.setSelectionRange(focusInfo.selStart, focusInfo.selEnd); }catch(e){}
+    }
+  }
 }
 
 function renderLogin(){
@@ -476,6 +510,10 @@ function installBannerHtml(){
 }
 function renderShell(){
   const role = profile.role;
+  const stillLoading = Object.keys(ui.loaded).length===0 || Object.values(ui.loaded).some(v=>!v);
+  if(stillLoading){
+    return `${installBannerHtml()}<div class="app-row"><div class="login-wrap" style="width:100%;"><p class="faint">Loading your data\u2026</p></div></div>`;
+  }
   const items = navItemsFor(role);
   if(!ui.view || !items.some(n=>n[0]===ui.view)) ui.view = items[0][0];
   const navHtml = items.map(n=>`<button class="${ui.view===n[0]?"active":""}" data-nav="${n[0]}">${n[1]}</button>`).join("");
@@ -926,6 +964,7 @@ function viewMyOrders(){
       ${showDriver ? (driver.selfPickup ? `<p class="faint" style="margin-top:12px;">Self pickup \u2014 ready to collect from our warehouse.</p>` : `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+telLink(driver.phone):""}</p>`) : ""}
       ${invoiceSites(inv).map(siteCardHtml).join("")}
       ${inv.notes ? `<p class="faint" style="margin-top:6px;">Note: ${esc(inv.notes)}</p>` : ""}
+      ${inv.status!=="delivered" ? `<button class="btn btn-sm" style="margin-top:12px;" data-act="customer-received" data-inv="${inv.id}">I've received this \u2014 notify us</button>` : (inv.receivedByCustomer ? `<p class="faint" style="margin-top:8px;">You marked this received.</p>` : "")}
     </div>`;
   }).join("");
 }
@@ -1007,21 +1046,33 @@ function newInvoiceForm(){
   }
   const driverOptions = `<option value="">Assign later</option>` + state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
   const rentalDriverOptions = `<option value="">\u2014</option>` + state.rentalDrivers.map(d=>`<option value="${d.id}">${esc(d.name)}${d.agency?" \u2014 "+esc(d.agency):""}</option>`).join("");
+  if(!ui.draftLegs || !ui.draftLegs.length) ui.draftLegs = [{donum:"",total:"",siteIds:[]}];
+  const custIdNow = el("f-customer") ? el("f-customer").value : "";
+  const legsHtml = ui.draftLegs.map((leg,idx)=>`<div class="card" style="margin-bottom:10px; padding:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <b style="font-size:13px;">Delivery ${idx+1}</b>
+        ${ui.draftLegs.length>1?`<button type="button" class="btn btn-sm btn-ghost" data-act="remove-invoice-leg" data-idx="${idx}">Remove</button>`:""}
+      </div>
+      <div class="field"><label>DO number</label><input id="f-leg-donum-${idx}" value="${esc(leg.donum||"")}" placeholder="e.g. DO-1187"></div>
+      <div class="field"><label>Delivery site(s) for this DO</label><div id="f-leg-sites-${idx}">${siteCheckboxesHtml(custIdNow, leg.siteIds||[], "f-leg-sites-"+idx)}</div></div>
+      <div class="field" style="margin-bottom:0;"><label>Total items for this DO</label><input id="f-leg-total-${idx}" type="number" min="1" value="${esc(leg.total||"")}" placeholder="e.g. 20"></div>
+    </div>`).join("");
   return `<h2>New invoice</h2>
-    <div class="field"><label>Invoice number (from the counter)</label><input id="f-invnum" placeholder="e.g. 4021"><p class="faint" style="margin-top:4px;">Shown as CIV-<i>whatever you enter</i> \u2014 no need to type CIV- yourself.</p></div>
-    <div class="field"><label>DO number</label><input id="f-donum" placeholder="e.g. DO-1187"></div>
+    <div class="field"><label>Invoice number (from the counter)</label><input id="f-invnum" value="${el("f-invnum")?esc(el("f-invnum").value):""}" placeholder="e.g. 4021"><p class="faint" style="margin-top:4px;">Shown as CIV-<i>whatever you enter</i> \u2014 no need to type CIV- yourself.</p></div>
     <div class="field" style="position:relative;">
       <label>Customer</label>
-      <input id="f-invcust-search" autocomplete="off" placeholder="Search customer">
-      <input type="hidden" id="f-customer" value="">
+      <input id="f-invcust-search" autocomplete="off" placeholder="Search customer" value="${el("f-invcust-search")?esc(el("f-invcust-search").value):""}">
+      <input type="hidden" id="f-customer" value="${esc(custIdNow)}">
       <div id="f-invcust-results" class="searchlist" style="display:none; position:absolute; z-index:6; width:100%; background:var(--surface);"></div>
     </div>
-    <div class="field"><label>Delivery site(s) \u2014 optional, pick more than one if items are split across sites</label><div id="f-site-checks">${siteCheckboxesHtml("", [], "f-site-checks")}</div></div>
-    <div class="field"><label>Total items on invoice</label><input id="f-total" type="number" min="1" placeholder="e.g. 20"></div>
+    <h3 style="font-size:14px; margin:16px 0 4px;">Deliveries under this invoice</h3>
+    <p class="faint" style="margin-bottom:10px;">One invoice number can cover several separate deliveries \u2014 each with its own DO number, site, and item count.</p>
+    ${legsHtml}
+    <button type="button" class="btn btn-sm btn-ghost" data-act="add-invoice-leg" style="margin-bottom:14px;">+ Add another delivery (separate DO/location)</button>
     <div class="field"><label>Company driver (optional, can assign later)</label><select id="f-driver-new">${driverOptions}</select></div>
     <div class="field"><label>Rental driver (optional, outside/non-employee)</label><select id="f-rental-driver-new">${rentalDriverOptions}</select></div>
     <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-selfpickup-new" style="width:auto;"> Self pickup \u2014 customer will collect, no driver needed</label></div>
-    <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2"></textarea></div>
+    <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2">${el("f-notes")?esc(el("f-notes").value):""}</textarea></div>
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-invoice">Create invoice</button></div>`;
 }
 function userForm(u){
@@ -1387,9 +1438,14 @@ function bindShell(){
       roleSel.addEventListener("change", sync); sync();
     }
     const newCustSel = el("f-customer");
-    const newSiteChecks = el("f-site-checks");
-    if(newCustSel && newSiteChecks && !el("f-invnum-e")){
-      newCustSel.addEventListener("change", ()=>{ newSiteChecks.innerHTML = siteCheckboxesHtml(newCustSel.value, [], "f-site-checks"); });
+    if(newCustSel && !el("f-invnum-e") && ui.draftLegs){
+      newCustSel.addEventListener("change", ()=>{
+        ui.draftLegs.forEach((leg,idx)=>{
+          leg.siteIds = [];
+          const box = el("f-leg-sites-"+idx);
+          if(box) box.innerHTML = siteCheckboxesHtml(newCustSel.value, [], "f-leg-sites-"+idx);
+        });
+      });
     }
     const editCustSel = el("f-customer-e");
     const editSiteChecks = el("f-site-e-checks");
@@ -1478,7 +1534,7 @@ function mainClickHandler(e){
   if(act==="show-more-customers"){ ui.customersShowLimit += 200; render(); return; }
   if(act==="show-more-sites"){ ui.sitesShowLimit += 200; render(); return; }
   if(act==="show-more-delivered"){ ui.deliveredShowLimit += 200; render(); return; }
-  if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; render(); }
+  if(act==="new-invoice"){ ui.modal={type:"new-invoice"}; ui.draftLegs=[{donum:"",total:"",siteIds:[]}]; render(); }
   else if(act==="new-customer"){ ui.modal={type:"new-customer"}; render(); }
   else if(act==="edit-customer"){ ui.modal={type:"edit-customer", id:b.getAttribute("data-id")}; render(); }
   else if(act==="open-customer"){ ui.modal={type:"customer-detail", id:b.getAttribute("data-id")}; render(); }
@@ -1505,6 +1561,7 @@ function mainClickHandler(e){
     render();
   }
   else if(act==="driver-in-transit"){ driverMarkInTransit(b.getAttribute("data-inv")); }
+  else if(act==="customer-received"){ customerMarkReceived(b.getAttribute("data-inv")); }
   else if(act==="driver-delivered"){ driverMarkDelivered(b.getAttribute("data-inv")); }
 }
 
@@ -1512,7 +1569,7 @@ async function modalClickHandler(e){
   const b = e.target.closest("[data-act]");
   if(!b) return;
   const act = b.getAttribute("data-act");
-  if(act==="close-modal"){ const ret=b.getAttribute("data-return"); ui.modal = ret ? {type:"customer-detail", id:ret} : null; ui.draftPending=null; render(); }
+  if(act==="close-modal"){ const ret=b.getAttribute("data-return"); ui.modal = ret ? {type:"customer-detail", id:ret} : null; ui.draftPending=null; ui.draftLegs=null; render(); }
   else if(act==="new-site-for"){ ui.modal={type:"new-site", forCustomerId:b.getAttribute("data-id"), returnTo:b.getAttribute("data-id")}; render(); }
   else if(act==="edit-site"){ ui.modal={type:"edit-site", id:b.getAttribute("data-id"), returnTo:b.getAttribute("data-return")||null}; render(); }
   else if(act==="del-site"){ if(confirm("Remove this site?")) await deleteDoc(doc(db,"sites",b.getAttribute("data-id"))); }
@@ -1566,22 +1623,26 @@ async function modalClickHandler(e){
     ui.modal=null; render(); showToast(id?"Rental driver updated":"Rental driver added");
   } else if(act==="save-invoice"){
     const num = el("f-invnum").value.trim();
-    const don = el("f-donum").value.trim();
     const cid = el("f-customer").value;
-    const total = parseInt(el("f-total").value,10)||0;
     const selfPickup = el("f-selfpickup-new") ? el("f-selfpickup-new").checked : false;
     const driverId = selfPickup ? null : (el("f-driver-new").value || null);
     const rentalDriverId = selfPickup ? null : (el("f-rental-driver-new") ? (el("f-rental-driver-new").value||null) : null);
-    const siteIds = Array.from(document.querySelectorAll('#f-site-checks .site-check:checked')).map(cb=>cb.getAttribute("data-site-id"));
+    const notes = el("f-notes").value.trim();
     if(!num || !cid){ showToast("Fill in invoice number and customer"); return; }
-    const newInv = {
-      invoiceNumber:num, doNumber:don, customerId:cid, totalItems:total, pendingItems:[],
-      status:"ordered", driverId, rentalDriverId, selfPickup, siteIds, notes:el("f-notes").value.trim(),
-      createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name, createdByRole:profile.role
-    };
-    newInv.history = [histLine("Invoice created"+(selfPickup?" (self pickup)":""))];
-    await addDoc(collection(db,"invoices"), newInv);
-    ui.modal=null; render(); showToast("Invoice created");
+    syncDraftLegsFromDom();
+    const legs = (ui.draftLegs||[]).filter(l=>l.donum.trim()!=="" || l.total || (l.siteIds&&l.siteIds.length));
+    const finalLegs = legs.length ? legs : [{donum:"",total:"",siteIds:[]}];
+    for(const leg of finalLegs){
+      const newInv = {
+        invoiceNumber:num, doNumber:leg.donum.trim(), customerId:cid, totalItems:parseInt(leg.total,10)||0, pendingItems:[],
+        status:"ordered", driverId, rentalDriverId, selfPickup, siteIds:leg.siteIds||[], notes,
+        createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name, createdByRole:profile.role
+      };
+      newInv.history = [histLine("Invoice created"+(selfPickup?" (self pickup)":"")+(finalLegs.length>1?" \u2014 one of "+finalLegs.length+" deliveries under this invoice number":""))];
+      await addDoc(collection(db,"invoices"), newInv);
+    }
+    ui.draftLegs = null;
+    ui.modal=null; render(); showToast(finalLegs.length>1 ? finalLegs.length+" deliveries created" : "Invoice created");
   } else if(act==="save-user"){
     const name = el("f-name").value.trim();
     const role = el("f-role").value;
@@ -1654,6 +1715,14 @@ async function modalClickHandler(e){
     const email = b.getAttribute("data-email");
     try{ await sendPasswordResetEmail(auth, email); showToast("Reset email sent to "+email); }
     catch(err){ showToast("Could not send reset email \u2014 "+(err.code||"try again")); }
+  } else if(act==="add-invoice-leg"){
+    syncDraftLegsFromDom();
+    ui.draftLegs.push({donum:"",total:"",siteIds:[]});
+    render();
+  } else if(act==="remove-invoice-leg"){
+    syncDraftLegsFromDom();
+    ui.draftLegs.splice(parseInt(b.getAttribute("data-idx"),10),1);
+    render();
   } else if(act==="add-pending-row"){
     ui.draftPending.items.push({ id:uid(), itemNumber:"", note:"", fulfilled:false });
     render();
@@ -1737,6 +1806,18 @@ function syncPendingFromInputs(){
   });
 }
 
+function syncDraftLegsFromDom(){
+  if(!ui.draftLegs) return;
+  ui.draftLegs.forEach((leg,idx)=>{
+    const donumEl = el("f-leg-donum-"+idx);
+    const totalEl = el("f-leg-total-"+idx);
+    const sitesBox = el("f-leg-sites-"+idx);
+    if(donumEl) leg.donum = donumEl.value;
+    if(totalEl) leg.total = totalEl.value;
+    if(sitesBox) leg.siteIds = Array.from(sitesBox.querySelectorAll(".site-check:checked")).map(cb=>cb.getAttribute("data-site-id"));
+  });
+}
+
 async function createFollowUpDelivery(invId, itemIds, driverId){
   const inv = state.invoices.find(i=>i.id===invId);
   if(!inv) return;
@@ -1774,6 +1855,19 @@ async function driverMarkDelivered(invId){
   const hist = withHist(inv, "Marked delivered by driver");
   await updateDoc(doc(db,"invoices",invId), { status:"delivered", updatedAt:Date.now(), history:hist });
   showToast("Marked delivered");
+}
+
+async function customerMarkReceived(invId){
+  const inv = state.invoices.find(i=>i.id===invId);
+  if(!inv) return;
+  if(!confirm("Confirm you've received this delivery? This notifies us and marks it delivered.")) return;
+  const hist = withHist(inv, "Marked received by customer (self-reported)");
+  try{
+    await updateDoc(doc(db,"invoices",invId), { status:"delivered", receivedByCustomer:true, updatedAt:Date.now(), history:hist });
+    showToast("Thanks \u2014 we've been notified");
+  }catch(err){
+    showToast("Could not update \u2014 "+(err.code||"try again"));
+  }
 }
 
 async function runCustomerImport(names){
