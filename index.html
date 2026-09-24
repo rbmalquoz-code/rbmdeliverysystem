@@ -225,6 +225,7 @@ function customerById(id){
 function driverById(id){ return state.drivers.find(d=>d.id===id); }
 function rentalDriverById(id){ return state.rentalDrivers.find(d=>d.id===id); }
 function assignedDriverInfo(inv){
+  if(inv.usePorter) return { isPorter:true, trackingLink: inv.porterTrackingLink||"" };
   if(inv.selfPickup) return { selfPickup:true };
   if(inv.rentalDriverId){ const d=rentalDriverById(inv.rentalDriverId); if(d) return { name:d.name, phone:d.phone, vehicle:d.vehicle, agency:d.agency, isRental:true }; }
   if(inv.driverId){ const d=driverById(inv.driverId); if(d) return { name:d.name, phone:d.phone, vehicle:d.vehicle, isRental:false }; }
@@ -305,7 +306,8 @@ function buildStatusMessage(inv){
   lines.push("Status: "+statusLabelFor(inv));
   if(inv.totalItems) lines.push("Items: "+inv.totalItems+" total"+(pend.length ? ", "+pend.length+" pending (will follow separately)" : ", all ready"));
   if(driver && inv.status==="in_transit"){
-    if(driver.selfPickup) lines.push("Ready for you to collect from our warehouse whenever convenient.");
+    if(driver.isPorter) lines.push(driver.trackingLink ? "Track live with Porter: "+driver.trackingLink : "Out for delivery via Porter.");
+    else if(driver.selfPickup) lines.push("Ready for you to collect from our warehouse whenever convenient.");
     else lines.push("Driver: "+driver.name+(driver.phone?" ("+driver.phone+")":""));
   }
   if(inv.eta) lines.push("Estimated delivery: "+inv.eta);
@@ -664,7 +666,7 @@ function viewLive(){
         return `<div class="kcard" data-open-invoice="${inv.id}">
           <b>${esc(dispInv(inv.invoiceNumber))}</b>
           <span class="faint">${esc(cust?cust.name:"\u2014")}</span><br>
-          ${inv.selfPickup?`<span class="pill pill-violet" style="margin-top:4px;">Self pickup</span> `:""}${pend?`<span class="pill pill-rust" style="margin-top:4px;">${pend} pending</span>`:""}
+          ${inv.selfPickup?`<span class="pill pill-violet" style="margin-top:4px;">Self pickup</span> `:""}${inv.usePorter?`<span class="pill pill-steel" style="margin-top:4px;">Porter</span> `:""}${pend?`<span class="pill pill-rust" style="margin-top:4px;">${pend} pending</span>`:""}
         </div>`;
       }).join("") : `<p class="faint" style="font-size:12.5px;">Nothing here.</p>`) +
       (st==="delivered" && full.length>25 ? `<p class="faint" style="font-size:12px;">+${full.length-25} more \u2014 see Overview</p>` : "") +
@@ -700,7 +702,7 @@ function invoicesTable(list){
       return `<tr class="row-click" data-open-invoice="${inv.id}">
         <td><b>${esc(dispInv(inv.invoiceNumber))}</b></td>
         <td>${esc(inv.doNumber||"\u2014")}</td>
-        <td>${esc(cust?cust.name:"\u2014")}${inv.selfPickup?` <span class="pill pill-violet">Self pickup</span>`:""}</td>
+        <td>${esc(cust?cust.name:"\u2014")}${inv.selfPickup?` <span class="pill pill-violet">Self pickup</span>`:""}${inv.usePorter?` <span class="pill pill-steel">Porter</span>`:""}</td>
         <td><span class="pill ${STATUS_PILL[inv.status]}">${statusLabelFor(inv)}</span></td>
         <td>${inv.totalItems||0} total${pend?` <span class="pill pill-rust">${pend} pending</span>`:""}</td>
         <td class="faint">${fmtDate(inv.createdAt)}</td>
@@ -1046,7 +1048,7 @@ function viewMyOrders(){
       <p style="margin-top:12px;">${inv.totalItems||0} items total${pend.length?`, <span style="color:var(--rust);">${pend.length} pending</span>`:", all ready"}</p>
       ${inv.eta ? `<p style="margin-top:6px;"><b>Estimated delivery:</b> ${esc(inv.eta)}</p>` : ""}
       ${pend.length ? `<div style="margin-top:10px;">${pend.map(p=>`<div class="itemline"><span class="name">Item ${esc(p.itemNumber)}${p.note?" \u2014 "+esc(p.note):""}</span><span class="pill pill-rust">pending</span></div>`).join("")}</div>` : ""}
-      ${showDriver ? (driver.selfPickup ? `<p class="faint" style="margin-top:12px;">Self pickup \u2014 ready to collect from our warehouse.</p>` : `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+telLink(driver.phone):""}</p>`) : ""}
+      ${showDriver ? (driver.isPorter ? (driver.trackingLink ? `<a class="btn btn-sm" style="margin-top:12px;" href="${esc(driver.trackingLink)}" target="_blank" rel="noopener">Track with Porter</a>` : `<p class="faint" style="margin-top:12px;">Out for delivery via Porter \u2014 tracking link coming soon.</p>`) : driver.selfPickup ? `<p class="faint" style="margin-top:12px;">Self pickup \u2014 ready to collect from our warehouse.</p>` : `<p class="faint" style="margin-top:12px;">Driver: ${esc(driver.name)}${driver.phone?" \u00b7 "+telLink(driver.phone):""}</p>`) : ""}
       ${invoiceSites(inv).map(siteCardHtml).join("")}
       ${inv.notes ? `<p class="faint" style="margin-top:6px;">Note: ${esc(inv.notes)}</p>` : ""}
       ${inv.status!=="delivered" ? `<button class="btn btn-sm" style="margin-top:12px;" data-act="customer-received" data-inv="${inv.id}">I've received this \u2014 notify us</button>` : (inv.receivedByCustomer ? `<p class="faint" style="margin-top:8px;">You marked this received.</p>` : "")}
@@ -1157,6 +1159,7 @@ function newInvoiceForm(){
     <div class="field"><label>Company driver (optional, can assign later)</label><select id="f-driver-new">${driverOptions}</select></div>
     <div class="field"><label>Rental driver (optional, outside/non-employee)</label><select id="f-rental-driver-new">${rentalDriverOptions}</select></div>
     <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-selfpickup-new" style="width:auto;"> Self pickup \u2014 customer will collect, no driver needed</label></div>
+    <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-porter-new" style="width:auto;"> Porter delivery \u2014 booked through Porter</label></div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" rows="2">${el("f-notes")?esc(el("f-notes").value):""}</textarea></div>
     <div class="modal-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="save-invoice">Create invoice</button></div>`;
 }
@@ -1381,6 +1384,12 @@ function invoiceDetail(id){
       <div class="field"><label>Company driver</label><select id="f-driver">${driverOptions}</select></div>
       <div class="field"><label>Rental driver (outside, not an employee)</label><select id="f-rental-driver">${rentalDriverOptions}</select></div>
       <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-selfpickup" style="width:auto;" ${inv.selfPickup?"checked":""}> Self pickup \u2014 customer will collect, no driver needed</label></div>
+      <div class="field"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="f-porter" style="width:auto;" ${inv.usePorter?"checked":""}> Porter delivery \u2014 booked through Porter</label></div>
+      <div class="field" id="f-porter-link-wrap" style="display:${inv.usePorter?"block":"none"};">
+        <label>Porter tracking link</label>
+        <input id="f-porter-link" value="${esc(inv.porterTrackingLink||"")}" placeholder="Paste the live tracking link Porter gives you after booking">
+        ${inv.porterTrackingLink ? `<a class="btn btn-sm" style="margin-top:8px;" href="${esc(inv.porterTrackingLink)}" target="_blank" rel="noopener">Track with Porter</a>` : ""}
+      </div>
       <div class="field"><label>Estimated time of delivery (optional)</label><input id="f-eta" value="${esc(inv.eta||"")}" placeholder="e.g. Today 4\u20136pm"><p class="faint" style="margin-top:4px;">Only shown to the customer once you fill this in.</p></div>
       <div class="modal-actions" style="justify-content:space-between;">
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -1541,23 +1550,35 @@ function bindShell(){
     const companyDrvSel = el("f-driver");
     const rentalDrvSel = el("f-rental-driver");
     const selfPickupCb = el("f-selfpickup");
-    if(companyDrvSel && rentalDrvSel){
-      companyDrvSel.addEventListener("change", ()=>{ if(companyDrvSel.value){ rentalDrvSel.value=""; if(selfPickupCb) selfPickupCb.checked=false; } });
-      rentalDrvSel.addEventListener("change", ()=>{ if(rentalDrvSel.value){ companyDrvSel.value=""; if(selfPickupCb) selfPickupCb.checked=false; } });
-    }
-    if(selfPickupCb){
-      selfPickupCb.addEventListener("change", ()=>{ if(selfPickupCb.checked){ if(companyDrvSel) companyDrvSel.value=""; if(rentalDrvSel) rentalDrvSel.value=""; } });
-    }
+    const porterCb = el("f-porter");
+    const porterLinkWrap = el("f-porter-link-wrap");
+    const clearOthers = (except)=>{
+      if(except!=="company" && companyDrvSel) companyDrvSel.value="";
+      if(except!=="rental" && rentalDrvSel) rentalDrvSel.value="";
+      if(except!=="selfpickup" && selfPickupCb) selfPickupCb.checked=false;
+      if(except!=="porter" && porterCb) porterCb.checked=false;
+      if(porterLinkWrap) porterLinkWrap.style.display = (porterCb && porterCb.checked) ? "block" : "none";
+    };
+    if(companyDrvSel) companyDrvSel.addEventListener("change", ()=>{ if(companyDrvSel.value) clearOthers("company"); });
+    if(rentalDrvSel) rentalDrvSel.addEventListener("change", ()=>{ if(rentalDrvSel.value) clearOthers("rental"); });
+    if(selfPickupCb) selfPickupCb.addEventListener("change", ()=>{ if(selfPickupCb.checked) clearOthers("selfpickup"); });
+    if(porterCb) porterCb.addEventListener("change", ()=>{ if(porterCb.checked) clearOthers("porter"); else if(porterLinkWrap) porterLinkWrap.style.display="none"; });
+
     const newDrvSel = el("f-driver-new");
     const newRentalDrvSel = el("f-rental-driver-new");
     const newSelfPickupCb = el("f-selfpickup-new");
-    if(newDrvSel && newRentalDrvSel){
-      newDrvSel.addEventListener("change", ()=>{ if(newDrvSel.value){ newRentalDrvSel.value=""; if(newSelfPickupCb) newSelfPickupCb.checked=false; } });
-      newRentalDrvSel.addEventListener("change", ()=>{ if(newRentalDrvSel.value){ newDrvSel.value=""; if(newSelfPickupCb) newSelfPickupCb.checked=false; } });
-    }
-    if(newSelfPickupCb){
-      newSelfPickupCb.addEventListener("change", ()=>{ if(newSelfPickupCb.checked){ if(newDrvSel) newDrvSel.value=""; if(newRentalDrvSel) newRentalDrvSel.value=""; } });
-    }
+    const newPorterCb = el("f-porter-new");
+    const clearOthersNew = (except)=>{
+      if(except!=="company" && newDrvSel) newDrvSel.value="";
+      if(except!=="rental" && newRentalDrvSel) newRentalDrvSel.value="";
+      if(except!=="selfpickup" && newSelfPickupCb) newSelfPickupCb.checked=false;
+      if(except!=="porter" && newPorterCb) newPorterCb.checked=false;
+    };
+    if(newDrvSel) newDrvSel.addEventListener("change", ()=>{ if(newDrvSel.value) clearOthersNew("company"); });
+    if(newRentalDrvSel) newRentalDrvSel.addEventListener("change", ()=>{ if(newRentalDrvSel.value) clearOthersNew("rental"); });
+    if(newSelfPickupCb) newSelfPickupCb.addEventListener("change", ()=>{ if(newSelfPickupCb.checked) clearOthersNew("selfpickup"); });
+    if(newPorterCb) newPorterCb.addEventListener("change", ()=>{ if(newPorterCb.checked) clearOthersNew("porter"); });
+
     bindCustomerPicker("f-customer-search", "f-customer", "f-customer-results", "Unassigned");
     bindCustomerPicker("f-customerlink-search", "f-customer-link", "f-customerlink-results", "\u2014");
     bindCustomerPicker("f-invcust-search", "f-customer", "f-invcust-results", "Select a customer");
@@ -1712,8 +1733,9 @@ async function modalClickHandler(e){
   } else if(act==="save-invoice"){
     const cid = el("f-customer").value;
     const selfPickup = el("f-selfpickup-new") ? el("f-selfpickup-new").checked : false;
-    const driverId = selfPickup ? null : (el("f-driver-new").value || null);
-    const rentalDriverId = selfPickup ? null : (el("f-rental-driver-new") ? (el("f-rental-driver-new").value||null) : null);
+    const usePorter = el("f-porter-new") ? el("f-porter-new").checked : false;
+    const driverId = (selfPickup||usePorter) ? null : (el("f-driver-new").value || null);
+    const rentalDriverId = (selfPickup||usePorter) ? null : (el("f-rental-driver-new") ? (el("f-rental-driver-new").value||null) : null);
     const notes = el("f-notes").value.trim();
     if(!cid){ showToast("Pick a customer"); return; }
     syncDraftLegsFromDom();
@@ -1722,10 +1744,10 @@ async function modalClickHandler(e){
     for(const leg of legs){
       const newInv = {
         invoiceNumber:leg.invnum.trim(), doNumber:leg.donum.trim(), customerId:cid, totalItems:parseInt(leg.total,10)||0, pendingItems:[],
-        status:"ordered", driverId, rentalDriverId, selfPickup, siteIds:leg.siteIds||[], notes,
+        status:"ordered", driverId, rentalDriverId, selfPickup, usePorter, porterTrackingLink:"", siteIds:leg.siteIds||[], notes,
         createdAt:Date.now(), createdByUid:profile.uid, createdByName:profile.name, createdByRole:profile.role
       };
-      newInv.history = [histLine("Invoice created"+(selfPickup?" (self pickup)":""))];
+      newInv.history = [histLine("Invoice created"+(selfPickup?" (self pickup)":"")+(usePorter?" (Porter)":""))];
       await addDoc(collection(db,"invoices"), newInv);
     }
     ui.draftLegs = null;
@@ -1822,11 +1844,19 @@ async function modalClickHandler(e){
     const inv = state.invoices.find(i=>i.id===invId);
     const cleanPending = ui.draftPending.items.filter(p=>p.itemNumber.trim()!=="");
     const newSelfPickup = el("f-selfpickup") ? el("f-selfpickup").checked : !!inv.selfPickup;
-    const newDriverId = newSelfPickup ? null : (el("f-driver") ? (el("f-driver").value||null) : inv.driverId);
-    const newRentalDriverId = newSelfPickup ? null : (el("f-rental-driver") ? (el("f-rental-driver").value||null) : (inv.rentalDriverId||null));
+    const newUsePorter = el("f-porter") ? el("f-porter").checked : !!inv.usePorter;
+    const newPorterLink = el("f-porter-link") ? el("f-porter-link").value.trim() : (inv.porterTrackingLink||"");
+    const newDriverId = (newSelfPickup||newUsePorter) ? null : (el("f-driver") ? (el("f-driver").value||null) : inv.driverId);
+    const newRentalDriverId = (newSelfPickup||newUsePorter) ? null : (el("f-rental-driver") ? (el("f-rental-driver").value||null) : (inv.rentalDriverId||null));
     let hist = inv.history||[];
     if(newSelfPickup !== !!inv.selfPickup){
       hist = withHist({history:hist}, newSelfPickup ? "Marked as self pickup" : "Self pickup removed");
+    }
+    if(newUsePorter !== !!inv.usePorter){
+      hist = withHist({history:hist}, newUsePorter ? "Marked as Porter delivery" : "Porter delivery removed");
+    }
+    if(newPorterLink !== (inv.porterTrackingLink||"") && newPorterLink){
+      hist = withHist({history:hist}, "Porter tracking link added");
     }
     if(newDriverId !== (inv.driverId||null)){
       const dName = newDriverId ? (driverById(newDriverId)||{}).name : "none";
@@ -1841,7 +1871,7 @@ async function modalClickHandler(e){
       hist = withHist({history:hist}, newEta ? "ETA set to "+newEta : "ETA cleared");
     }
     hist = withHist({history:hist}, "Pending items updated ("+cleanPending.length+" pending)");
-    const patch = { pendingItems:cleanPending, driverId:newDriverId, rentalDriverId:newRentalDriverId, selfPickup:newSelfPickup, eta:newEta, updatedAt:Date.now(), history:hist };
+    const patch = { pendingItems:cleanPending, driverId:newDriverId, rentalDriverId:newRentalDriverId, selfPickup:newSelfPickup, usePorter:newUsePorter, porterTrackingLink:newPorterLink, eta:newEta, updatedAt:Date.now(), history:hist };
     if(profile.role==="admin" || profile.role==="counter"){
       patch.invoiceNumber = el("f-invnum-e").value.trim();
       patch.doNumber = el("f-donum-e").value.trim();
