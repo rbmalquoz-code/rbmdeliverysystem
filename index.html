@@ -1306,8 +1306,8 @@ function customerDetailView(id){
   } else {
     const previewUser = c.name ? slugifyUsername(c.name) : "";
     const previewPass = c.company ? reverseStr(c.company) : "";
-    loginHtml = `<p class="faint" style="margin-bottom:10px;">No login yet \u2014 suggested below from their name/company, but feel free to change either before creating it.</p>
-      <div class="field"><label>Username</label><input id="f-login-username" value="${esc(previewUser)}" placeholder="username"></div>
+    loginHtml = `<p class="faint" style="margin-bottom:10px;">No login yet \u2014 suggested below from their name/company, but feel free to change either. Use their real email here instead if you'd rather they log in with that.</p>
+      <div class="field"><label>Username or email</label><input id="f-login-username" value="${esc(previewUser)}" placeholder="username, or a full email address"></div>
       <div class="field"><label>Password</label><input id="f-login-password" value="${esc(previewPass)}" placeholder="At least 6 characters"></div>
       <button class="btn btn-sm btn-primary" data-act="create-customer-login" data-id="${id}">Create login</button>`;
   }
@@ -2136,17 +2136,24 @@ async function createCustomerLogin(customerId){
   if(!c) return;
   const rawUsername = el("f-login-username") ? el("f-login-username").value.trim() : "";
   const password = el("f-login-password") ? el("f-login-password").value : "";
-  const username = slugifyUsername(rawUsername);
-  if(!username){ showToast("Enter a username (letters and numbers)"); return; }
-  if(username !== rawUsername.toLowerCase()){ showToast("Username can only have lowercase letters and numbers \u2014 try: "+username); return; }
+  if(!rawUsername){ showToast("Enter a username or email"); return; }
   if(password.length < 6){ showToast("Password needs to be at least 6 characters"); return; }
 
-  let existing;
-  try{ existing = await getDoc(doc(db,"usernames",username)); }
-  catch(err){ showToast("Could not check username availability"); return; }
-  if(existing.exists()){ showToast("That username is already taken \u2014 pick a different one"); return; }
+  const isRealEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawUsername);
+  let username = null, email;
+  if(isRealEmail){
+    email = rawUsername.toLowerCase();
+  } else {
+    username = slugifyUsername(rawUsername);
+    if(!username){ showToast("Enter a username (letters and numbers) or a full email address"); return; }
+    if(username !== rawUsername.toLowerCase()){ showToast("A plain username can only have lowercase letters and numbers \u2014 try \""+username+"\", or use their full email address instead"); return; }
+    let existing;
+    try{ existing = await getDoc(doc(db,"usernames",username)); }
+    catch(err){ showToast("Could not check username availability"); return; }
+    if(existing.exists()){ showToast("That username is already taken \u2014 pick a different one"); return; }
+    email = username + "@customer.rbmdeliverysystem.local";
+  }
 
-  const email = username + "@customer.rbmdeliverysystem.local";
   const secondary = getApps().find(a=>a.name==="Secondary") || initializeApp(firebaseConfig, "Secondary");
   const secondaryAuth = getAuth(secondary);
   let newUid = null;
@@ -2155,17 +2162,17 @@ async function createCustomerLogin(customerId){
     newUid = cred.user.uid;
   }catch(err){
     await signOut(secondaryAuth).catch(()=>{});
-    if(err.code==="auth/email-already-in-use") showToast("That username's sign-in record already exists (maybe from a deleted login) \u2014 try a different username.");
+    if(err.code==="auth/email-already-in-use") showToast(isRealEmail ? "That email is already registered to a login \u2014 check Users & roles, or use a different email." : "That username's sign-in record already exists (maybe from a deleted login) \u2014 try a different username.");
     else showToast("Could not create login \u2014 "+(err.code||"try again"));
     return;
   }
   try{
     await signOut(secondaryAuth);
     await setDoc(doc(db,"users",newUid), { name:c.name, email, role:"customer", customerId, driverId:null, loginUsername:username, createdAt:Date.now() });
-    await setDoc(doc(db,"usernames",username), { email, customerId, createdAt:Date.now() });
+    if(username) await setDoc(doc(db,"usernames",username), { email, customerId, createdAt:Date.now() });
     await setDoc(doc(db,"secrets",newUid), { initialPasswordHint:password, createdAt:Date.now() });
-    await updateDoc(doc(db,"customers",customerId), { loginUsername:username });
-    showToast("Login created \u2014 username: "+username);
+    await updateDoc(doc(db,"customers",customerId), { loginUsername:username||email });
+    showToast("Login created \u2014 sign in with: "+(username||email));
     render();
   }catch(err){
     showToast("Could not finish setting up the login \u2014 "+(err.code||"try again"));
